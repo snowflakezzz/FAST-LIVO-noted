@@ -20,21 +20,21 @@ namespace lidar_selection {
 class LidarSelector {
   public:
     int grid_size;
-    vk::AbstractCamera* cam;
+    vk::AbstractCamera* cam;                      // 相机模型
     SparseMap* sparse_map;
     StatesGroup* state;
     StatesGroup* state_propagat;
-    M3D Rli, Rci, Rcw, Jdphi_dR, Jdp_dt, Jdp_dR;
+    M3D Rli, Rci, Rcw, Jdphi_dR, Jdp_dt, Jdp_dR;  // camera到world系
     V3D Pli, Pci, Pcw;
     int* align_flag;
     int* grid_num;
     int* map_index;
-    float* map_dist;
+    float* map_dist;                              // 当前帧各个格网中到光心最近的地图点
     float* map_value;
     float* patch_cache;
     float* patch_with_border_;
-    int width, height, grid_n_width, grid_n_height, length;
-    SubSparseMap* sub_sparse_map;
+    int width, height, grid_n_width, grid_n_height, length;   // length格网个数
+    SubSparseMap* sub_sparse_map;                 // 用于构建视觉残差的点
     double fx,fy,cx,cy;
     bool ncc_en;
     int debug, patch_size, patch_size_total, patch_size_half;
@@ -98,7 +98,7 @@ class LidarSelector {
     void AddPoint(PointPtr pt_new);
     int getBestSearchLevel(const Matrix2d& A_cur_ref, const int max_level);
     void display_keypatch(double time);
-    void updateFrameState(StatesGroup state);
+    void updateFrameState(StatesGroup state);   // 更新当前帧状态
     V3F getpixel(cv::Mat img, V2D pc);
 
     void warpAffine(
@@ -115,9 +115,9 @@ class LidarSelector {
     PointCloudXYZI::Ptr Map_points_output;
     PointCloudXYZI::Ptr pg_down;
     pcl::VoxelGrid<PointType> downSizeFilter;
-    unordered_map<VOXEL_KEY, VOXEL_POINTS*> feat_map;
-    unordered_map<VOXEL_KEY, float> sub_feat_map; //timestamp
-    unordered_map<int, Warp*> Warp_map; // reference frame id, A_cur_ref and search_level
+    unordered_map<VOXEL_KEY, VOXEL_POINTS*> feat_map;     // 视觉点云地图
+    unordered_map<VOXEL_KEY, float> sub_feat_map;         // 记录各个voxel块中点的数量
+    unordered_map<int, Warp*> Warp_map;                   // 记录每个特征点对应的参考帧reference frame id, A_cur_ref and search_level
 
     vector<VOXEL_KEY> occupy_postions;
     set<VOXEL_KEY> sub_postion;
@@ -127,7 +127,7 @@ class LidarSelector {
 
     cv::Mat img_cp, img_rgb;
     std::vector<FramePtr> overlap_kfs_;
-    FramePtr new_frame_;
+    FramePtr new_frame_;                        // 新图像观测帧
     FramePtr last_kf_;
     Map map_;
     enum Stage {

@@ -46,7 +46,7 @@ public:
   Vector3d                    normal_;                  //!< Surface normal at point.
   Matrix3d                    normal_information_;      //!< Inverse covariance matrix of normal estimation.
   bool                        normal_set_;              //!< Flag whether the surface normal was estimated or not.
-  list<FeaturePtr>              obs_;                     //!< References to keyframes which observe the point.
+  list<FeaturePtr>            obs_;                     //!< References to keyframes which observe the point.
   size_t                      n_obs_;                   //!< Number of observations: Keyframes AND successful reprojections in intermediate frames.
   int                         last_published_ts_;       //!< Timestamp of last publishing.
   int                         last_projected_kf_id_;    //!< Flag for the reprojection: don't reproject a pt twice.
@@ -55,7 +55,7 @@ public:
   int                         n_succeeded_reproj_;      //!< Number of succeeded reprojections. Used to assess the quality of the point.
   int                         last_structure_optim_;    //!< Timestamp of last point optimization
   bool                        have_scaled;
-  float                       value;
+  float                       value;                    // fast角点得分，用于非极大值抑制
   Point(const Vector3d& pos);
   Point(const Vector3d& pos, FeaturePtr ftr);
   ~Point();

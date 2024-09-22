@@ -67,7 +67,7 @@ class ImuProcess
   ofstream fout_imu;
   V3D cov_acc;
   V3D cov_gyr;
-  V3D cov_acc_scale;
+  V3D cov_acc_scale;          // imu尺度因子
   V3D cov_gyr_scale;
   V3D cov_bias_gyr;
   V3D cov_bias_acc;
@@ -86,7 +86,7 @@ class ImuProcess
   PointCloudXYZI::Ptr cur_pcl_un_;
   sensor_msgs::ImuConstPtr last_imu_;
   deque<sensor_msgs::ImuConstPtr> v_imu_;
-  vector<Pose6D> IMUpose;
+  vector<Pose6D> IMUpose;                     // 记录IMU在各个观测点的状态
   vector<M3D>    v_rot_pcl_;
   M3D Lid_rot_to_IMU;
   V3D Lid_offset_to_IMU;
@@ -97,7 +97,7 @@ class ImuProcess
   V3D last_acc;
   V3D last_ang;
   double start_timestamp_;
-  double last_lidar_end_time_;
+  double last_lidar_end_time_;                  // 记录去畸变到哪一时刻的雷达扫描
   int    init_iter_num = 1;
   bool   b_first_frame_ = true;
   bool   imu_need_init_ = true;

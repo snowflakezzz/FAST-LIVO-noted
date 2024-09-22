@@ -138,6 +138,7 @@ bool Point::getClosePose(const FramePtr& new_frame, FeaturePtr& ftr) const
   return true;
 }
 
+// 通过fov选取最近的图像块
 bool Point::getCloseViewObs(const Vector3d& framepos, FeaturePtr& ftr, const Vector2d& cur_px) const
 {
   // TODO: get frame with same point of view AND same pyramid level!
@@ -159,15 +160,6 @@ bool Point::getCloseViewObs(const Vector3d& framepos, FeaturePtr& ftr, const Vec
   }
   ftr = *min_it;
   
-  // Vector2d ftr_px = ftr->px;
-  // double pixel_dist = (cur_px-ftr_px).norm();
-  
-  // if(pixel_dist > 200) 
-  // {
-  //   ROS_ERROR("The pixel dist exceeds 200.");
-  //   return false;    
-  // }
-    
   if(min_cos_angle < 0.5) // assume that observations larger than 60° are useless 0.5
   {
     // ROS_ERROR("The obseved angle is larger than 60°.");

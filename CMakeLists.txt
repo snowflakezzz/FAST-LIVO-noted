@@ -9,6 +9,12 @@ set( CMAKE_CXX_FLAGS "-std=c++14 -O3" )
 
 add_definitions(-DROOT_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/\")
 
+# add_definitions(-DUSE_IKFOM)
+add_definitions(-DUSE_ikdtree)
+# add_definitions(-DDEBUG_PRINT)
+# add_definitions(-DUSE_ikdforest)
+# add_definitions(-DUSE_FOV_Checker)
+
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fexceptions" )
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

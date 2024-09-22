@@ -152,7 +152,7 @@ void LidarSelector::addSparseMap(cv::Mat img, PointCloudXYZI::Ptr pg)
 
     // double t_b1 = omp_get_wtime() - t0;
     // t0 = omp_get_wtime();
-    
+    // 只有在当前特征点的shiTomasi角点评分比原本对应voxel内角点评分好的时候，才往其中添加新特征
     for (int i=0; i<pg->size(); i++) 
     {
         V3D pt(pg->points[i].x, pg->points[i].y, pg->points[i].z);
@@ -238,6 +238,7 @@ void LidarSelector::AddPoint(PointPtr pt_new)
     }
 }
 
+// https://www.cnblogs.com/mafuqiang/p/9575599.html
 void LidarSelector::getWarpMatrixAffine(
     const vk::AbstractCamera& cam,
     const Vector2d& px_ref,
@@ -253,8 +254,6 @@ void LidarSelector::getWarpMatrixAffine(
   const Vector3d xyz_ref(f_ref*depth_ref);
   Vector3d xyz_du_ref(cam.cam2world(px_ref + Vector2d(halfpatch_size,0)*(1<<level_ref)*(1<<pyramid_level)));
   Vector3d xyz_dv_ref(cam.cam2world(px_ref + Vector2d(0,halfpatch_size)*(1<<level_ref)*(1<<pyramid_level)));
-//   Vector3d xyz_du_ref(cam.cam2world(px_ref + Vector2d(halfpatch_size,0)*(1<<level_ref)));
-//   Vector3d xyz_dv_ref(cam.cam2world(px_ref + Vector2d(0,halfpatch_size)*(1<<level_ref)));
   xyz_du_ref *= xyz_ref[2]/xyz_du_ref[2];
   xyz_dv_ref *= xyz_ref[2]/xyz_dv_ref[2];
   const Vector2d px_cur(cam.world2cam(T_cur_ref*(xyz_ref)));
@@ -299,6 +298,7 @@ void LidarSelector::warpAffine(
         // *patch_ptr = 0;
       else
         patch[patch_size_total*pyramid_level + y*patch_size+x] = (float) vk::interpolateMat_8u(img_ref, px[0], px[1]);
+        // vk::interpolateMat_8u双线性差值
         // *patch_ptr = (uint8_t) vk::interpolateMat_8u(img_ref, px[0], px[1]);
     }
   }
@@ -329,7 +329,7 @@ int LidarSelector::getBestSearchLevel(
 {
   // Compute patch level in other image
   int search_level = 0;
-  double D = A_cur_ref.determinant();
+  double D = A_cur_ref.determinant();   // 行列式
 
   while(D > 3.0 && search_level < max_level)
   {
@@ -355,9 +355,11 @@ void LidarSelector::addFromSparseMap(cv::Mat img, PointCloudXYZI::Ptr pg)
     if(feat_map.size()<=0) return;
     // double ts0 = omp_get_wtime();
 
+    // step1 点云降采样
     pg_down->reserve(feat_map.size());
     downSizeFilter.setInputCloud(pg);
     downSizeFilter.filter(*pg_down);
+    std::cout << " pg_down size: " << pg_down->points.size() <<std::endl;
     
     reset_grid();
     memset(map_value, 0, sizeof(float)*length);
@@ -370,6 +372,7 @@ void LidarSelector::addFromSparseMap(cv::Mat img, PointCloudXYZI::Ptr pg)
     unordered_map<VOXEL_KEY, float>().swap(sub_feat_map);
     unordered_map<int, Warp*>().swap(Warp_map);
 
+    // step2 将激光点云投影到图像上，构建深度图像
     cv::Mat depth_img = cv::Mat::zeros(height, width, CV_32FC1);
     float* it = (float*)depth_img.data;
 
@@ -389,7 +392,7 @@ void LidarSelector::addFromSparseMap(cv::Mat img, PointCloudXYZI::Ptr pg)
         // Determine the key of hash table      
         for(int j=0; j<3; j++)
         {
-            loc_xyz[j] = floor(pt_w[j] / voxel_size);
+            loc_xyz[j] = floor(pt_w[j] / voxel_size);   // 记录点在哪一个voxel
         }
         VOXEL_KEY position(loc_xyz[0], loc_xyz[1], loc_xyz[2]);
 
@@ -399,7 +402,7 @@ void LidarSelector::addFromSparseMap(cv::Mat img, PointCloudXYZI::Ptr pg)
             sub_feat_map[position] = 1.0;
         }
                     
-        V3D pt_c(new_frame_->w2f(pt_w));
+        V3D pt_c(new_frame_->w2f(pt_w));        // to frame坐标系
 
         V2D px;
         if(pt_c[2] > 0)
@@ -416,22 +419,17 @@ void LidarSelector::addFromSparseMap(cv::Mat img, PointCloudXYZI::Ptr pg)
             }
         }
     }
-    
-    // imshow("depth_img", depth_img);
-    // printf("A1: %.6lf \n", omp_get_wtime() - ts1);
-    // printf("A11. calculate pt position: %.6lf \n", t_position);
-    // printf("A12. sub_postion.insert(position): %.6lf \n", t_insert);
-    // printf("A13. generate depth map: %.6lf \n", t_depth);
     // printf("A. projection: %.6lf \n", omp_get_wtime() - ts0);
-    
+    std::cout << " sub_feat_map size: " << sub_feat_map.size() <<std::endl;
 
     // double t1 = omp_get_wtime();
 
+    // step3 格网划分，非极大值抑制，获取各个格网对应地图点
     for(auto& iter : sub_feat_map)
     {   
         VOXEL_KEY position = iter.first;
         // double t4 = omp_get_wtime();
-        auto corre_voxel = feat_map.find(position);
+        auto corre_voxel = feat_map.find(position);     // 在点云地图中寻找该voxel块
         // double t5 = omp_get_wtime();
 
         if(corre_voxel != feat_map.end())
@@ -442,29 +440,28 @@ void LidarSelector::addFromSparseMap(cv::Mat img, PointCloudXYZI::Ptr pg)
             {
                 PointPtr pt = voxel_points[i];
                 if(pt==nullptr) continue;
-                V3D pt_cam(new_frame_->w2f(pt->pos_));
+                V3D pt_cam(new_frame_->w2f(pt->pos_));  // 视觉坐标系坐标
                 if(pt_cam[2]<0) continue;
 
-                V2D pc(new_frame_->w2c(pt->pos_));
+                V2D pc(new_frame_->w2c(pt->pos_));      // 像素坐标
 
-                FeaturePtr ref_ftr;
-      
+                // step3.1 判断地图点投影是否在图像中，图像边缘的点不使用
                 if(new_frame_->cam_->isInFrame(pc.cast<int>(), (patch_size_half+1)*8)) // 20px is the patch size in the matcher
                 {
                     int index = static_cast<int>(pc[0]/grid_size)*grid_n_height + static_cast<int>(pc[1]/grid_size);
-                    grid_num[index] = TYPE_MAP;
-                    Vector3d obs_vec(new_frame_->pos() - pt->pos_);
+                    grid_num[index] = TYPE_MAP;                         // 标记该图像块包含的视觉地图点
+                    Vector3d obs_vec(new_frame_->pos() - pt->pos_);     // 光心到地图点的距离
 
                     float cur_dist = obs_vec.norm();
                     float cur_value = pt->value;
 
-                    if (cur_dist <= map_dist[index]) 
+                    if (cur_dist <= map_dist[index])        // 保留到光心距离最近的地图点
                     {
                         map_dist[index] = cur_dist;
                         voxel_points_[index] = pt;
                     } 
 
-                    if (cur_value >= map_value[index])
+                    if (cur_value >= map_value[index])      // 保留该格网内最大shiTomasi得分https://blog.csdn.net/hzwwpgmwy/article/details/81482278
                     {
                         map_value[index] = cur_value;
                     }
@@ -479,10 +476,10 @@ void LidarSelector::addFromSparseMap(cv::Mat img, PointCloudXYZI::Ptr pg)
 
     double t_2, t_3, t_4, t_5;
     t_2=t_3=t_4=t_5=0;
-
+    // step4 特征筛选并构建patch光流误差
     for (int i=0; i<length; i++) 
     { 
-        if (grid_num[i]==TYPE_MAP) //&& map_value[i]>10)
+        if (grid_num[i]==TYPE_MAP) //如果该格网中存在视觉地图点
         {
             // double t_1 = omp_get_wtime();
 
@@ -492,7 +489,8 @@ void LidarSelector::addFromSparseMap(cv::Mat img, PointCloudXYZI::Ptr pg)
 
             V2D pc(new_frame_->w2c(pt->pos_));
             V3D pt_cam(new_frame_->w2f(pt->pos_));
-   
+
+            // step4.1 判断当前特征点的深度是否连续 true表示不连续，舍弃该特征
             bool depth_continous = false;
             for (int u=-patch_size_half; u<=patch_size_half; u++)
             {
@@ -522,13 +520,14 @@ void LidarSelector::addFromSparseMap(cv::Mat img, PointCloudXYZI::Ptr pg)
             
             FeaturePtr ref_ftr;
 
+            // step4.2 筛选与当前帧观测夹角最小帧中提取出的Feature特征
             if(!pt->getCloseViewObs(new_frame_->pos(), ref_ftr, pc)) continue;
 
             // t_3 += omp_get_wtime() - t_1;
 
             float* patch_wrap = new float[patch_size_total*3];
 
-            patch_wrap = ref_ftr->patch;
+            patch_wrap = ref_ftr->patch;       // 参考帧patch块
 
             // t_1 = omp_get_wtime();
            
@@ -542,11 +541,11 @@ void LidarSelector::addFromSparseMap(cv::Mat img, PointCloudXYZI::Ptr pg)
                 A_cur_ref_zero = iter_warp->second->A_cur_ref;
             }
             else
-            {
+            {   // 计算仿射变换，即patch因为视角的变换，应该具有一定的扭曲
                 getWarpMatrixAffine(*cam, ref_ftr->px, ref_ftr->f, (ref_ftr->pos() - pt->pos_).norm(), 
                 new_frame_->T_f_w_ * ref_ftr->T_f_w_.inverse(), 0, 0, patch_size_half, A_cur_ref_zero);
                 
-                search_level = getBestSearchLevel(A_cur_ref_zero, 2);
+                search_level = getBestSearchLevel(A_cur_ref_zero, 2);   // 获取搜索层
 
                 Warp *ot = new Warp(search_level, A_cur_ref_zero);
                 Warp_map[ref_ftr->id_] = ot;
@@ -557,10 +556,11 @@ void LidarSelector::addFromSparseMap(cv::Mat img, PointCloudXYZI::Ptr pg)
             // t_1 = omp_get_wtime();
 
             for(int pyramid_level=0; pyramid_level<=0; pyramid_level++)
-            {                
+            {
+                // 仿射变换，进行视角转换
                 warpAffine(A_cur_ref_zero, ref_ftr->img, ref_ftr->px, ref_ftr->level, search_level, pyramid_level, patch_size_half, patch_wrap);
             }
-
+            // 当前帧patch块
             getpatch(img, pc, patch_cache, 0);
 
             if(ncc_en)
@@ -574,6 +574,7 @@ void LidarSelector::addFromSparseMap(cv::Mat img, PointCloudXYZI::Ptr pg)
             {
                 error += (patch_wrap[ind]-patch_cache[ind]) * (patch_wrap[ind]-patch_cache[ind]);
             }
+            // 如果两patch块光度误差大于阈值，则不适用该特征
             if(error > outlier_threshold*patch_size_total) continue;
             
             sub_map_cur_frame_.push_back(pt);
@@ -748,6 +749,7 @@ void LidarSelector::FeatureAlignment(cv::Mat img)
     }
 }
 
+// 卡尔曼滤波更新
 float LidarSelector::UpdateState(cv::Mat img, float total_residual, int level) 
 {
     int total_points = sub_sparse_map->index.size();
@@ -844,14 +846,8 @@ float LidarSelector::UpdateState(cv::Mat img, float total_residual, int level)
                     //}
                     double res = w_ref_tl*img_ptr[0] + w_ref_tr*img_ptr[scale] + w_ref_bl*img_ptr[scale*width] + w_ref_br*img_ptr[scale*width+scale]  - P[patch_size_total*level + x*patch_size+y];
                     z(i*patch_size_total+x*patch_size+y) = res;
-                    // float weight = 1.0;
-                    // if(iteration > 0)
-                    //     weight = weight_function_->value(res/weight_scale_); 
-                    // R(i*patch_size_total+x*patch_size+y) = weight;       
                     patch_error +=  res*res;
                     n_meas_++;
-                    // H.block<1,6>(i*patch_size_total+x*patch_size+y,0) << JdR*weight, Jdt*weight;
-                    // if((level==2 && iteration==0) || (level==1 && iteration==0) || level==0)
                     H_sub.block<1,6>(i*patch_size_total+x*patch_size+y,0) << JdR, Jdt;
                 }
             }  
@@ -870,11 +866,6 @@ float LidarSelector::UpdateState(cv::Mat img, float total_residual, int level)
         {
             old_state = (*state);
             last_error = error;
-
-            // K = (H.transpose() / img_point_cov * H + state->cov.inverse()).inverse() * H.transpose() / img_point_cov;
-            // auto vec = (*state_propagat) - (*state);
-            // G = K*H;
-            // (*state) += (-K*z + vec - G*vec);
 
             auto &&H_sub_T = H_sub.transpose();
             H_T_H.block<6,6>(0,0) = H_sub_T * H_sub;
@@ -1041,18 +1032,18 @@ void LidarSelector::detect(cv::Mat img, PointCloudXYZI::Ptr pg)
 {
     if(width!=img.cols || height!=img.rows)
     {
-        // std::cout<<"Resize the img scale !!!"<<std::endl;
+        std::cout<<"Resize the img scale !!!"<<std::endl;
         double scale = 0.5;
         cv::resize(img,img,cv::Size(img.cols*scale,img.rows*scale),0,0,CV_INTER_LINEAR);
     }
     img_rgb = img.clone();
     img_cp = img.clone();
-    cv::cvtColor(img,img,CV_BGR2GRAY);
+    cv::cvtColor(img,img,CV_BGR2GRAY);      // 转为灰度图像
 
     new_frame_.reset(new Frame(cam, img.clone()));
     updateFrameState(*state);
 
-    if(stage_ == STAGE_FIRST_FRAME && pg->size()>10)
+    if(stage_ == STAGE_FIRST_FRAME && pg->size()>10)    // 首帧作为关键帧（没用上关键帧筛选）
     {
         new_frame_->setKeyframe();
         stage_ = STAGE_DEFAULT_FRAME;
@@ -1060,16 +1051,14 @@ void LidarSelector::detect(cv::Mat img, PointCloudXYZI::Ptr pg)
 
     double t1 = omp_get_wtime();
 
-    addFromSparseMap(img, pg);
+    addFromSparseMap(img, pg);          // 筛选用于构建残差的地图点
 
     double t3 = omp_get_wtime();
 
-    addSparseMap(img, pg);
+    addSparseMap(img, pg);              // 视觉地图增广
 
     double t4 = omp_get_wtime();
-    
-    // computeH = ekf_time = 0.0;
-    
+       
     ComputeJ(img);
 
     double t5 = omp_get_wtime();

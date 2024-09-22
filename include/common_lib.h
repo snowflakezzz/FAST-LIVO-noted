@@ -22,12 +22,6 @@ using namespace std;
 using namespace Eigen;
 using namespace Sophus;
 
-// #define DEBUG_PRINT
-#define USE_ikdtree
-// #define USE_ikdforest
-// #define USE_IKFOM
-// #define USE_FOV_Checker
-
 #define print_line std::cout << __FILE__ << ", " << __LINE__ << std::endl;
 #define PI_M (3.14159265358)
 #define G_m_s2 (9.81)         // Gravaty const in GuangDong/China
@@ -145,9 +139,10 @@ namespace std
   };
 }
 
+// 存储图像及IMU数据
 struct MeasureGroup     
 {
-    double img_offset_time;
+    double img_offset_time;                     // 图像时间戳与lidar扫描开始时间的差值
     deque<sensor_msgs::Imu::ConstPtr> imu;
     cv::Mat img;
     MeasureGroup()
@@ -158,12 +153,12 @@ struct MeasureGroup
 
 struct LidarMeasureGroup
 {
-    double lidar_beg_time;
+    double lidar_beg_time;                      // 当前帧点云扫描开始时间
     double last_update_time;
-    PointCloudXYZI::Ptr lidar;
-    std::deque<struct MeasureGroup> measures;
-    bool is_lidar_end;
-    int lidar_scan_index_now;
+    PointCloudXYZI::Ptr lidar;                  // 当前帧点云
+    std::deque<struct MeasureGroup> measures;   // 存视觉及imu数据（上一次更新->当前帧点云扫描结束）
+    bool is_lidar_end;                          // 单帧雷达是否处理完成
+    int lidar_scan_index_now;                   // 当前处理的扫描相对于扫描开始的偏移量
     LidarMeasureGroup()
     {
         lidar_beg_time = 0.0;
@@ -190,11 +185,6 @@ struct LidarMeasureGroup
         std::cout<<"lidar_.points.size(): "<<this->lidar->points.size()<<endl<<endl;
     };
 };
-
-// struct Frames
-// {
-//     vector<cv::Mat> imgs;
-// };
 
 struct SparseMap
 {
