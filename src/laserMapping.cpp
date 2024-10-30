@@ -54,6 +54,7 @@
 #include <pcl/point_types.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/io/pcd_io.h>
+#include <pcl/io/ply_io.h>
 #include <sensor_msgs/PointCloud2.h>
 #include <tf/transform_datatypes.h>
 #include <tf/transform_broadcaster.h>
@@ -65,6 +66,9 @@
 #include <opencv2/opencv.hpp>
 #include <vikit/camera_loader.h>
 #include"lidar_selection.h"
+#include <sensor_msgs/CompressedImage.h>
+#include <sensor_msgs/NavSatFix.h>
+#include <cv_bridge/cv_bridge.h>
 
 #ifdef USE_ikdtree
     #ifdef USE_ikdforest
@@ -96,7 +100,8 @@ condition_variable sig_buffer;
 // mutex mtx_buffer_pointcloud;
 
 string root_dir = ROOT_DIR;
-string map_file_path, lid_topic, imu_topic, img_topic, config_file;;
+string map_file_path, lid_topic, imu_topic, img_topic, gnss_topic, config_file;
+bool bgnss_en;
 M3D Eye3d(M3D::Identity());
 M3F Eye3f(M3F::Identity());
 V3D Zero3d(0, 0, 0);
@@ -110,7 +115,7 @@ int MIN_IMG_COUNT = 0;
 double res_mean_last = 0.05;
 //double gyr_cov_scale, acc_cov_scale;
 double gyr_cov_scale = 0, acc_cov_scale = 0;
-//double last_timestamp_lidar, last_timestamp_imu = -1.0;
+//double last_timestamp_lidar,  当前接收到的最新imu数据的时间戳;
 double last_timestamp_lidar = 0, last_timestamp_imu = -1.0, last_timestamp_img = -1.0;
 //double filter_size_corner_min, filter_size_surf_min, filter_size_map_min, fov_deg;
 double filter_size_corner_min = 0, filter_size_surf_min = 0, filter_size_map_min = 0, fov_deg = 0;
@@ -213,6 +218,7 @@ PointCloudXYZI::Ptr pcl_wait_save_lidar(new PointCloudXYZI());  //add save xyzi 
 bool pcd_save_en = true;
 int pcd_save_interval = 20, pcd_index = 0;
 
+std::vector<V3D> week_direction_g;          // 退化方向
 
 void SigHandle(int sig)
 {
@@ -461,6 +467,12 @@ void livox_pcl_cbk(const livox_ros_driver::CustomMsg::ConstPtr &msg)
     sig_buffer.notify_all();
 }
 
+deque<sensor_msgs::NavSatFixConstPtr> gnss_buffer;
+void gnss_cbk(const sensor_msgs::NavSatFix::ConstPtr& msg_in){
+    sensor_msgs::NavSatFixConstPtr msg(new sensor_msgs::NavSatFix(*msg_in));
+    gnss_buffer.push_back(msg);
+}
+
 void imu_cbk(const sensor_msgs::Imu::ConstPtr &msg_in) 
 {
     publish_count ++;
@@ -478,6 +490,14 @@ void imu_cbk(const sensor_msgs::Imu::ConstPtr &msg_in)
     }
 
     last_timestamp_imu = timestamp;
+
+    // // adjust for mini
+    // msg->linear_acceleration.x *= 200;
+    // msg->linear_acceleration.y *= 200;
+    // msg->linear_acceleration.z *= 200;
+    // msg->angular_velocity.x *= 200;
+    // msg->angular_velocity.y *= 200;
+    // msg->angular_velocity.z *= 200;
 
     imu_buffer.push_back(msg);
     // cout<<"got imu: "<<timestamp<<" imu size "<<imu_buffer.size()<<endl;
@@ -516,6 +536,24 @@ void img_cbk(const sensor_msgs::ImageConstPtr& msg)
     sig_buffer.notify_all();
 }
 
+// 处理压缩后的图像信息
+void comimg_cbk(const sensor_msgs::CompressedImageConstPtr& msg){
+    cv_bridge::CvImagePtr cv_ptr;
+    try{
+        cv_ptr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8);
+    }
+    catch (cv_bridge::Exception& e){
+        ROS_ERROR("cv_bridge exception: %s", e.what());
+        return;
+    }
+
+    sensor_msgs::ImagePtr image_msg = cv_ptr->toImageMsg();
+    image_msg->header = msg->header;
+
+    img_cbk(image_msg);
+}
+
+// 数据对齐
 bool sync_packages(LidarMeasureGroup &meas)
 {
     if ((lidar_buffer.empty() && img_buffer.empty())) { // has lidar topic or img topic?
@@ -529,7 +567,7 @@ bool sync_packages(LidarMeasureGroup &meas)
     }
     
     // step1 存入lidar数据
-    if (!lidar_pushed) { // If not in lidar scan, need to generate new meas
+    if (!lidar_pushed) { // 标记一帧雷达是否处理完成 If not in lidar scan, need to generate new meas
         if (lidar_buffer.empty()) {
             // ROS_ERROR("out sync");
             return false;
@@ -550,12 +588,16 @@ bool sync_packages(LidarMeasureGroup &meas)
         }
         sort(meas.lidar->points.begin(), meas.lidar->points.end(), time_list); // sort by sample timestamp
         meas.lidar_beg_time = time_buffer.front(); // generate lidar_beg_time
-        lidar_end_time = meas.lidar_beg_time + meas.lidar->points.back().curvature / double(1000); // calc lidar scan end time
+        lidar_end_time = meas.lidar_beg_time + meas.lidar->points.back().curvature / double(1000); // calc lidar scan end time and trans to sec
         lidar_pushed = true; // flag
     }
 
     // step2 存入imu数据
     struct MeasureGroup m;
+    while(!gnss_buffer.empty() && gnss_buffer.front()->header.stamp.toSec()<last_timestamp_imu){
+        gnss_buffer.pop_front();
+    }
+
     // step2.1 如果当前不存在image数据，或图像帧在当前lidar帧后
     if (img_buffer.empty() || (img_time_buffer.front()>lidar_end_time) )
     { // has img topic, but img topic timestamp larger than lidar end time, process lidar topic.
@@ -567,6 +609,12 @@ bool sync_packages(LidarMeasureGroup &meas)
         double imu_time = imu_buffer.front()->header.stamp.toSec();
         m.imu.clear();
         mtx_buffer.lock();
+        // 存入gnss观测数据
+        if(!gnss_buffer.empty() && gnss_buffer.front()->header.stamp.toSec()<lidar_end_time){
+            m.gnss = gnss_buffer.front();
+            gnss_buffer.pop_front();
+        } 
+
         while ((!imu_buffer.empty() && (imu_time<lidar_end_time))) 
         {
             imu_time = imu_buffer.front()->header.stamp.toSec();
@@ -595,6 +643,12 @@ bool sync_packages(LidarMeasureGroup &meas)
         m.img_offset_time = img_start_time - meas.lidar_beg_time; // record img offset time, it shoule be the Kalman update timestamp.
         m.img = img_buffer.front();
         mtx_buffer.lock();
+        // 存入gnss观测数据
+        if(!gnss_buffer.empty() && gnss_buffer.front()->header.stamp.toSec()<img_start_time){
+            m.gnss = gnss_buffer.front();
+            gnss_buffer.pop_front();
+        } 
+
         while ((!imu_buffer.empty() && (imu_time<img_start_time))) 
         {
             imu_time = imu_buffer.front()->header.stamp.toSec();
@@ -870,6 +924,7 @@ void publish_mavros(const ros::Publisher & mavros_pose_publisher)
     mavros_pose_publisher.publish(msg_body_pose);
 }
 
+// 输出定位轨迹
 void publish_path(const ros::Publisher pubPath)
 {
     set_posestamp(msg_body_pose.pose);
@@ -1034,6 +1089,8 @@ void readParameters(ros::NodeHandle &nh)
     nh.param<string>("common/lid_topic",lid_topic,"/livox/lidar");
     nh.param<string>("common/imu_topic", imu_topic,"/livox/imu");
     nh.param<string>("camera/img_topic", img_topic,"/left_camera/image");
+    nh.param<bool>("gnss_en", bgnss_en, false);
+    if(bgnss_en) nh.param<string>("common/gnss_topic", gnss_topic,"/navsat/fix");
     nh.param<double>("filter_size_corner",filter_size_corner_min,0.5);
     nh.param<double>("filter_size_surf",filter_size_surf_min,0.5);
     nh.param<double>("filter_size_map",filter_size_map_min,0.5);
@@ -1047,14 +1104,59 @@ void readParameters(ros::NodeHandle &nh)
     nh.param<bool>("feature_extract_enable", p_pre->feature_enabled, 0);
     nh.param<vector<double>>("mapping/extrinsic_T", extrinT, vector<double>());
     nh.param<vector<double>>("mapping/extrinsic_R", extrinR, vector<double>());
-    nh.param<vector<double>>("camera/Pcl", cameraextrinT, vector<double>());
-    nh.param<vector<double>>("camera/Rcl", cameraextrinR, vector<double>());
+
+    if(nh.hasParam("camera/Pcl") && nh.hasParam("camera/Rcl")){
+        nh.param<vector<double>>("camera/Pcl", cameraextrinT, vector<double>());
+        nh.param<vector<double>>("camera/Rcl", cameraextrinR, vector<double>());
+    }
+    else if(nh.hasParam("camera/extrinsic_T") && nh.hasParam("camera/extrinsic_R")){
+        nh.param<vector<double>>("camera/extrinsic_T", cameraextrinT, vector<double>());
+        nh.param<vector<double>>("camera/extrinsic_R", cameraextrinR, vector<double>());
+        M3D Ric, Ril, Rcl; V3D Tic, Til, Tcl;
+        Ric << MAT_FROM_ARRAY(cameraextrinR);
+        Tic << VEC_FROM_ARRAY(cameraextrinT);
+        Ril << MAT_FROM_ARRAY(extrinR);
+        Til << VEC_FROM_ARRAY(extrinT);
+        Rcl = Ril * Ric.transpose();
+        Tcl = Ric * (Tic - Til);
+        std::copy(Rcl.data(), Rcl.data()+Rcl.size(), cameraextrinR.begin());
+        std::copy(Tcl.data(), Tcl.data()+Tcl.size(), cameraextrinT.begin());
+    }
+
     nh.param<int>("grid_size", grid_size, 40);
     nh.param<int>("patch_size", patch_size, 4);
     nh.param<double>("outlier_threshold",outlier_threshold,100);
     nh.param<double>("ncc_thre", ncc_thre, 100);
     nh.param<bool>("pcd_save/pcd_save_en", pcd_save_en, false);
     nh.param<double>("delta_time", delta_time, 0.0);
+}
+
+
+// 求解特征向量
+Eigen::MatrixXd calculateEigenVectors(const Eigen::MatrixXd& H) {
+    Eigen::MatrixXd HTH = H.transpose() * H; 
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix<double, 3,3>> solve(HTH);
+    Eigen::Matrix3d evec = solve.eigenvectors().real();
+    return evec;
+}
+
+// 求各个特征向量方向上的约束大小
+V3D calculateContributions(const Eigen::MatrixXd& H, Eigen::MatrixXd& evec) {
+    V3D contrib;
+    contrib.setZero();
+
+    for (size_t feat_idx = 0u; feat_idx < H.rows(); ++feat_idx) {
+        for (size_t dir_idx = 0u; dir_idx < 3; ++dir_idx) {
+            V3D feat_row = H.row(feat_idx).transpose();
+            feat_row.normalize();
+            V3D dir = evec.col(dir_idx);
+            const float dotp = fabs(feat_row.dot(dir));
+            if (dotp > 0.5) {
+                contrib(dir_idx) += dotp;
+            }
+        }
+    }
+    return contrib;
 }
 
 int main(int argc, char** argv)
@@ -1069,7 +1171,15 @@ int main(int argc, char** argv)
         nh.subscribe(lid_topic, 200000, livox_pcl_cbk) : \
         nh.subscribe(lid_topic, 200000, standard_pcl_cbk);
     ros::Subscriber sub_imu = nh.subscribe(imu_topic, 200000, imu_cbk);
-    ros::Subscriber sub_img = nh.subscribe(img_topic, 200000, img_cbk);
+    string::size_type idx;
+    idx = img_topic.find("compressed");     // 判断image是否为压缩过的话题
+    ros::Subscriber sub_img = idx == string::npos ? \
+                nh.subscribe(img_topic, 200000, img_cbk) : \
+                nh.subscribe(img_topic, 200000, comimg_cbk);
+    // gnss数据
+    if(bgnss_en) ros::Subscriber sub_gnss = nh.subscribe("/gnss/gnss_2d", 200000, gnss_cbk);
+
+    // ros::Subscriber sub_img = nh.subscribe(img_topic, 200000, img_cbk);
     image_transport::Publisher img_pub = it.advertise("/rgb_img", 1);
     ros::Publisher pubLaserCloudFullRes = nh.advertise<sensor_msgs::PointCloud2>
             ("/cloud_registered", 100);
@@ -1206,7 +1316,7 @@ int main(int argc, char** argv)
         // 统计各模块运行时间
         match_time = kdtree_search_time = kdtree_search_counter = solve_time = solve_const_H_time = svd_time   = 0;
         t0 = omp_get_wtime();
-        // step3 点云去畸变，到雷达扫描结束或图像帧处
+        // step3 imu初始化，点云去畸变到雷达扫描结束或图像帧处
         #ifdef USE_IKFOM
         p_imu->Process(LidarMeasures, kf, feats_undistort);
         state_point = kf.get_x();
@@ -1221,7 +1331,7 @@ int main(int argc, char** argv)
             LidarMeasures.debug_show();
         }
 
-        if (feats_undistort->empty() || (feats_undistort == nullptr))
+        if (feats_undistort->empty() || (feats_undistort == nullptr))   // imu还未初始化成功
         {
             if (!fast_lio_is_ready)
             {
@@ -1229,6 +1339,7 @@ int main(int argc, char** argv)
                 p_imu->first_lidar_time = first_lidar_time;
                 LidarMeasures.measures.clear();
                 cout<<"FAST-LIO not ready"<<endl;
+                cout << "wait for imu init!" << endl;
                 continue;
             }
         }
@@ -1244,19 +1355,20 @@ int main(int argc, char** argv)
         if (! LidarMeasures.is_lidar_end) 
         {
             cout<<"[ VIO ]: Raw feature num: "<<pcl_wait_pub->points.size() << "." << endl;
-            if (first_lidar_time<10)
-            {
-                continue;
-            }
+            // if (first_lidar_time<10)    // ???
+            // {
+            //     continue;
+            // }
             // cout<<"cur state:"<<state.rot_end<<endl;
             if (img_en) {
                 euler_cur = RotMtoEuler(state.rot_end);
                 fout_pre << setw(20) << LidarMeasures.last_update_time - first_lidar_time << " " << euler_cur.transpose()*57.3 << " " << state.pos_end.transpose() << " " << state.vel_end.transpose() \
                                 <<" "<<state.bias_g.transpose()<<" "<<state.bias_a.transpose()<<" "<<state.gravity.transpose()<< endl;
-                
+                // step4.1 视觉追踪、残差构建、state位姿优化更新
                 lidar_selector->detect(LidarMeasures.measures.back().img, pcl_wait_pub);
                 int size_sub = lidar_selector->sub_map_cur_frame_.size();
                 
+                // step4.2 点云可视化
                 sub_map_cur_frame_point->clear();
                 for(int i=0; i<size_sub; i++)
                 {
@@ -1286,24 +1398,12 @@ int main(int argc, char** argv)
             continue;
         }
 
-        /*** Segment the map in lidar FOV ***/
-        #ifndef USE_ikdforest            
-            lasermap_fov_segment();
-        #endif
+        // step5 点云降采样，并初始化ikdtree的局部地图
         /*** downsample the feature points in a scan ***/
         downSizeFilterSurf.setInputCloud(feats_undistort);
         downSizeFilterSurf.filter(*feats_down_body);
     #ifdef USE_ikdtree
         /*** initialize the map kdtree ***/
-        #ifdef USE_ikdforest
-        if (!ikdforest.initialized){
-            if(feats_down_body->points.size() > 5){
-                ikdforest.Build(feats_down_body->points, true, lidar_end_time);
-            }
-            continue;                
-        }
-        int featsFromMapNum = ikdforest.total_size;
-        #else
         if(ikdtree.Root_Node == nullptr)
         {
             if(feats_down_body->points.size() > 5)
@@ -1314,24 +1414,12 @@ int main(int argc, char** argv)
             continue;
         }
         int featsFromMapNum = ikdtree.size();
-        #endif
-    #else
-        if(featsFromMap->points.empty())
-        {
-            downSizeFilterMap.setInputCloud(feats_down_body);
-        }
-        else
-        {
-            downSizeFilterMap.setInputCloud(featsFromMap);
-        }
-        downSizeFilterMap.filter(*featsFromMap);
-        int featsFromMapNum = featsFromMap->points.size();
     #endif
         feats_down_size = feats_down_body->points.size();
         cout<<"[ LIO ]: Raw feature num: "<<feats_undistort->points.size()<<" downsamp num "<<feats_down_size<<" Map num: "<<featsFromMapNum<< "." << endl;
 
         /*** ICP and iterated Kalman filter update ***/
-        normvec->resize(feats_down_size);
+        normvec->resize(feats_down_size);           // 存储拟合的平面参数
         feats_down_world->resize(feats_down_size);
         res_last.resize(feats_down_size, 1000.0);
         
@@ -1339,55 +1427,20 @@ int main(int argc, char** argv)
         if (lidar_en)
         {
             euler_cur = RotMtoEuler(state.rot_end);
-            #ifdef USE_IKFOM
-            //state_ikfom fout_state = kf.get_x();
-            fout_pre << setw(20) << LidarMeasures.last_update_time - first_lidar_time << " " << euler_cur.transpose()*57.3 << " " << state_point.pos.transpose() << " " << state_point.vel.transpose() \
-            <<" "<<state_point.bg.transpose()<<" "<<state_point.ba.transpose()<<" "<<state_point.grav<< endl;
-            #else
             fout_pre << setw(20) << LidarMeasures.last_update_time  - first_lidar_time << " " << euler_cur.transpose()*57.3 << " " << state.pos_end.transpose() << " " << state.vel_end.transpose() \
             <<" "<<state.bias_g.transpose()<<" "<<state.bias_a.transpose()<<" "<<state.gravity.transpose()<< endl;
-            #endif
         }
-
-    #ifdef USE_ikdtree
-        if(0)
-        {
-            PointVector ().swap(ikdtree.PCL_Storage);
-            ikdtree.flatten(ikdtree.Root_Node, ikdtree.PCL_Storage, NOT_RECORD);
-            featsFromMap->clear();
-            featsFromMap->points = ikdtree.PCL_Storage;
-        }
-    #else
-        kdtreeSurfFromMap->setInputCloud(featsFromMap);
-    #endif
 
         point_selected_surf.resize(feats_down_size, true);
         pointSearchInd_surf.resize(feats_down_size);
         Nearest_Points.resize(feats_down_size);
         int  rematch_num = 0;
-        bool nearest_search_en = true; //
+        bool nearest_search_en = true;
 
         t2 = omp_get_wtime();
         
         /*** iterated state estimation ***/
-        #ifdef MP_EN
-        printf("[ LIO ]: Using multi-processor, used core number: %d.\n", MP_PROC_NUM);
-        #endif
         double t_update_start = omp_get_wtime();
-        #ifdef USE_IKFOM
-        double solve_H_time = 0;
-        kf.update_iterated_dyn_share_modified(LASER_POINT_COV, solve_H_time);
-        //state_ikfom updated_state = kf.get_x();
-        state_point = kf.get_x();
-        //euler_cur = RotMtoEuler(state_point.rot.toRotationMatrix());
-        euler_cur = SO3ToEuler(state_point.rot);
-        pos_lid = state_point.pos + state_point.rot * state_point.offset_T_L_I;
-        // cout<<"position: "<<pos_lid.transpose()<<endl;
-        geoQuat.x = state_point.rot.coeffs()[0];
-        geoQuat.y = state_point.rot.coeffs()[1];
-        geoQuat.z = state_point.rot.coeffs()[2];
-        geoQuat.w = state_point.rot.coeffs()[3];
-        #else
 
         if(img_en)
         {
@@ -1396,9 +1449,10 @@ int main(int argc, char** argv)
             for(int i=0;i<1;i++) {}
         }
 
-        // step5 基于lidar观测的迭代误差卡尔曼滤波更新
+        // step6 基于lidar观测的迭代误差卡尔曼滤波更新
         if(lidar_en)
         {
+            Eigen::MatrixXd h_lidar_last;
             for (iterCount = -1; iterCount < NUM_MAX_ITERATIONS && flg_EKF_inited; iterCount++) 
             {
                 match_start = omp_get_wtime();
@@ -1407,27 +1461,23 @@ int main(int argc, char** argv)
                 total_residual = 0.0; 
 
                 /** closest surface search and residual computation **/
+                // step6.1 多线并行，构建雷达残差存在res_last中
                 #ifdef MP_EN
                     omp_set_num_threads(MP_PROC_NUM);
                     #pragma omp parallel for
                 #endif
-                // normvec->resize(feats_down_size);
                 for (int i = 0; i < feats_down_size; i++)
                 {
                     PointType &point_body  = feats_down_body->points[i];
                     PointType &point_world = feats_down_world->points[i];
                     V3D p_body(point_body.x, point_body.y, point_body.z);
-                    /* transform to world frame */
+                    // step6.1.1 计算点云的世界坐标
                     pointBodyToWorld(&point_body, &point_world);
                     vector<float> pointSearchSqDis(NUM_MATCH_POINTS);
-                    #ifdef USE_ikdtree
-                        auto &points_near = Nearest_Points[i];
-                    #else
-                        auto &points_near = pointSearchInd_surf[i];
-                    #endif
+                    auto &points_near = Nearest_Points[i];
                     uint8_t search_flag = 0;  
                     double search_start = omp_get_wtime();
-                    // 寻找最近临点
+                    // step6.1.2 最近临点搜寻
                     if (nearest_search_en)
                     {
                         /** Find the closest surfaces in the map **/
@@ -1437,22 +1487,17 @@ int main(int argc, char** argv)
                             #else
                                 ikdtree.Nearest_Search(point_world, NUM_MATCH_POINTS, points_near, pointSearchSqDis);
                             #endif
-                        #else
-                            kdtreeSurfFromMap->nearestKSearch(point_world, NUM_MATCH_POINTS, points_near, pointSearchSqDis);
                         #endif
 
                         point_selected_surf[i] = pointSearchSqDis[NUM_MATCH_POINTS - 1] > 5 ? false : true;
 
-                        #ifdef USE_ikdforest
-                            point_selected_surf[i] = point_selected_surf[i] && (search_flag == 0);
-                        #endif
                         kdtree_search_time += omp_get_wtime() - search_start;
                         kdtree_search_counter ++;                        
                     }
 
                     if (!point_selected_surf[i] || points_near.size() < NUM_MATCH_POINTS) continue;
                     
-                    // 平面拟合及残差构建
+                    // step6.1.3 平面拟合及残差构建，拟合的平面参数存储在normvec
                     VF(4) pabcd;
                     point_selected_surf[i] = false;
                     if (esti_plane(pabcd, points_near, 0.1f)) //(planeValid)
@@ -1471,6 +1516,8 @@ int main(int argc, char** argv)
                         }
                     }
                 }
+
+                // step6.2 筛选有效约束
                 effct_feat_num = 0;
                 laserCloudOri->resize(feats_down_size);
                 corr_normvect->reserve(feats_down_size);
@@ -1484,14 +1531,14 @@ int main(int argc, char** argv)
                         effct_feat_num ++;
                     }
                 }
-
+                std::cout << "lidar effrct feat num: " << effct_feat_num << std::endl;
                 res_mean_last = total_residual / effct_feat_num;
                 match_time  += omp_get_wtime() - match_start;
                 solve_start  = omp_get_wtime();
                 
-                /*** Computation of Measuremnt Jacobian matrix H and measurents vector ***/
-                MatrixXd Hsub(effct_feat_num, 6);
-                VectorXd meas_vec(effct_feat_num);
+                // step6.3 计算观测方差雅各比矩阵
+                MatrixXd Hsub(effct_feat_num, 6);   // 观测雅各比矩阵
+                VectorXd meas_vec(effct_feat_num);  // 观测残差矩阵
 
                 for (int i = 0; i < effct_feat_num; i++)
                 {
@@ -1514,12 +1561,15 @@ int main(int argc, char** argv)
                 }
                 solve_const_H_time += omp_get_wtime() - solve_start;
 
+                h_lidar_last = Hsub.leftCols(3);
+
                 MatrixXd K(DIM_STATE, effct_feat_num);
 
                 EKF_stop_flg = false;
                 flg_EKF_converged = false;
                 
                 /*** Iterative Kalman Filter Update ***/
+                // step6.4 误差卡尔曼滤波更新
                 if (!flg_EKF_inited)
                 {
                     cout<<"||||||||||Initiallizing LiDar||||||||||"<<endl;
@@ -1576,8 +1626,7 @@ int main(int argc, char** argv)
                 }
                 euler_cur = RotMtoEuler(state.rot_end);
                 
-
-                /*** Rematch Judgement ***/
+                // step6.5 判断是否要重新进行最近临点搜索及残差构建
                 nearest_search_en = false;
                 if (flg_EKF_converged || ((rematch_num == 0) && (iterCount == (NUM_MAX_ITERATIONS - 2))))
                 {
@@ -1594,9 +1643,9 @@ int main(int argc, char** argv)
                         // G.setZero();
                         // G.block<DIM_STATE,6>(0,0) = K * Hsub;
                         state.cov = (I_STATE - G) * state.cov;
-                        total_distance += (state.pos_end - position_last).norm();
+                        total_distance += (state.pos_end - position_last).norm();   // 系统运行距离
                         position_last = state.pos_end;
-                        geoQuat = tf::createQuaternionMsgFromRollPitchYaw
+                        geoQuat = tf::createQuaternionMsgFromRollPitchYaw           // 更新后的姿态
                                     (euler_cur(0), euler_cur(1), euler_cur(2));
 
                         VD(DIM_STATE) K_sum  = K.rowwise().sum();
@@ -1611,10 +1660,26 @@ int main(int argc, char** argv)
 
                 if (EKF_stop_flg)   break;
             }
+            
+            int n_uninformative = 25;           // 判断是否退化的阈值
+            if(h_lidar_last.rows() > 3) {
+                auto eig_vec = calculateEigenVectors(h_lidar_last);
+                V3D contribs_pos = calculateContributions(h_lidar_last, eig_vec);       // 各方向约束值
+                std::cout <<"3 " << contribs_pos[0] << " " <<  contribs_pos[1] << " " <<  contribs_pos[2] <<std::endl;
+
+                for (int idx = 0; idx < 3; ++idx) {
+                    if (contribs_pos(idx) < n_uninformative) {
+                        week_direction_g.push_back(eig_vec.col(idx));
+                    }
+                }
+            }
+
+            if(week_direction_g.empty()){
+                week_direction_g.push_back(V3D(1,0,0));
+            }
         }
         
         // cout<<"[ mapping ]: iteration count: "<<iterCount+1<<endl;
-        #endif
         // SaveTrajTUM(LidarMeasures.lidar_beg_time, state.rot_end, state.pos_end);
         double t_update_end = omp_get_wtime();
         /******* Publish odometry *******/

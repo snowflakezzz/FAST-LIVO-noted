@@ -56,7 +56,7 @@ void LidarSelector::init()
     height = cam->height();
     grid_n_width = static_cast<int>(width/grid_size);
     grid_n_height = static_cast<int>(height/grid_size);
-    length = grid_n_width * grid_n_height;
+    length = grid_n_width * grid_n_height;                  // 图像中划分的格网个数
     fx = cam->errorMultiplier2();
     fy = cam->errorMultiplier() / (4. * fx);
     grid_num = new int[length];
@@ -372,7 +372,6 @@ void LidarSelector::addFromSparseMap(cv::Mat img, PointCloudXYZI::Ptr pg)
     unordered_map<VOXEL_KEY, float>().swap(sub_feat_map);
     unordered_map<int, Warp*>().swap(Warp_map);
 
-    // step2 将激光点云投影到图像上，构建深度图像
     cv::Mat depth_img = cv::Mat::zeros(height, width, CV_32FC1);
     float* it = (float*)depth_img.data;
 
@@ -384,6 +383,7 @@ void LidarSelector::addFromSparseMap(cv::Mat img, PointCloudXYZI::Ptr pg)
     // printf("A0. initial depthmap: %.6lf \n", omp_get_wtime() - ts0);
     // double ts1 = omp_get_wtime();
 
+    // step2 将激光点云投影到图像上，构建深度图像
     for(int i=0; i<pg_down->size(); i++)
     {
         // Transform Point to world coordinate
@@ -401,8 +401,9 @@ void LidarSelector::addFromSparseMap(cv::Mat img, PointCloudXYZI::Ptr pg)
         {
             sub_feat_map[position] = 1.0;
         }
-                    
-        V3D pt_c(new_frame_->w2f(pt_w));        // to frame坐标系
+        
+        // step2.2 计算视觉坐标系下坐标、像素坐标
+        V3D pt_c(new_frame_->w2f(pt_w));
 
         V2D px;
         if(pt_c[2] > 0)
@@ -778,7 +779,7 @@ float LidarSelector::UpdateState(cv::Mat img, float total_residual, int level)
     // H.setZero();
     H_sub.resize(H_DIM, 6);
     H_sub.setZero();
-    
+    // step1 迭代误差卡尔曼滤波
     for (int iteration=0; iteration<NUM_MAX_ITERATIONS; iteration++) 
     {
         // double t1 = omp_get_wtime();
@@ -795,7 +796,7 @@ float LidarSelector::UpdateState(cv::Mat img, float total_residual, int level)
         
         M3D p_hat;
         int i;
-
+        // step1.1 计算观测方程雅各比及残差
         for (i=0; i<sub_sparse_map->index.size(); i++) 
         {
             patch_error = 0.0;
@@ -861,7 +862,7 @@ float LidarSelector::UpdateState(cv::Mat img, float total_residual, int level)
         error = error/n_meas_;
 
         // double t3 = omp_get_wtime();
-
+        // step1.2 如果残差在减小，则更新状态，否则退出迭代
         if (error <= last_error) 
         {
             old_state = (*state);
@@ -918,7 +919,7 @@ void LidarSelector::addObservation(cv::Mat img)
     {
         PointPtr pt = sub_sparse_map->voxel_points[i];
         if(pt==nullptr) continue;
-        V2D pc(new_frame_->w2c(pt->pos_));
+        V2D pc(new_frame_->w2c(pt->pos_));  
         SE3 pose_cur = new_frame_->T_f_w_;
         bool add_flag = false;
         // if (sub_sparse_map->errors[i]<= 100*patch_size_total && sub_sparse_map->errors[i]>0) //&& align_flag[i]==1) 
@@ -979,7 +980,7 @@ void LidarSelector::ComputeJ(cv::Mat img)
     {
         now_error = UpdateState(img, error, level);
     }
-    if (now_error < error)
+    if (now_error < error)  // 只有当滤波后观测残差小于滤波前观测残差时，才更新状态方差
     {
         state->cov -= G*state->cov;
     }
@@ -1030,6 +1031,7 @@ V3F LidarSelector::getpixel(cv::Mat img, V2D pc)
 
 void LidarSelector::detect(cv::Mat img, PointCloudXYZI::Ptr pg) 
 {
+    // step1 图像预处理，转化为灰度图
     if(width!=img.cols || height!=img.rows)
     {
         std::cout<<"Resize the img scale !!!"<<std::endl;
@@ -1039,26 +1041,27 @@ void LidarSelector::detect(cv::Mat img, PointCloudXYZI::Ptr pg)
     img_rgb = img.clone();
     img_cp = img.clone();
     cv::cvtColor(img,img,CV_BGR2GRAY);      // 转为灰度图像
-
+    
+    // step2 构建新帧
     new_frame_.reset(new Frame(cam, img.clone()));
     updateFrameState(*state);
 
-    if(stage_ == STAGE_FIRST_FRAME && pg->size()>10)    // 首帧作为关键帧（没用上关键帧筛选）
+    if(stage_ == STAGE_FIRST_FRAME && pg->size()>10)    // 首帧作为关键帧
     {
         new_frame_->setKeyframe();
         stage_ = STAGE_DEFAULT_FRAME;
     }
 
     double t1 = omp_get_wtime();
-
-    addFromSparseMap(img, pg);          // 筛选用于构建残差的地图点
+    // step3 视觉patch残差构建
+    addFromSparseMap(img, pg);
 
     double t3 = omp_get_wtime();
-
-    addSparseMap(img, pg);              // 视觉地图增广
+    // step4 视觉点云地图添加
+    addSparseMap(img, pg);
 
     double t4 = omp_get_wtime();
-       
+    // step5 迭代误差卡尔曼滤波计算，更新state
     ComputeJ(img);
 
     double t5 = omp_get_wtime();

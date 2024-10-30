@@ -9,6 +9,8 @@ set( CMAKE_CXX_FLAGS "-std=c++14 -O3" )
 
 add_definitions(-DROOT_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/\")
 
+add_definitions(-w)
+
 # add_definitions(-DUSE_IKFOM)
 add_definitions(-DUSE_ikdtree)
 # add_definitions(-DDEBUG_PRINT)
@@ -72,6 +74,7 @@ find_package(PCL REQUIRED)
 FIND_PACKAGE(OpenCV REQUIRED)
 FIND_PACKAGE(Sophus REQUIRED)
 FIND_PACKAGE(Boost REQUIRED COMPONENTS thread)
+find_package(Ceres REQUIRED)
 set(Sophus_LIBRARIES libSophus.so)
 
 message(Eigen: ${EIGEN3_INCLUDE_DIR})
@@ -83,6 +86,7 @@ include_directories(
   ${PYTHON_INCLUDE_DIRS}
   ${OpenCV_INCLUDE_DIRS}
   ${Sophus_INCLUDE_DIRS}
+  ${CERES_INCLUDE_DIRS}
   include)
 
 add_message_files(
@@ -114,8 +118,9 @@ add_library(vio src/lidar_selection.cpp
 add_executable(fastlivo_mapping src/laserMapping.cpp 
                                 src/IMU_Processing.cpp
                                 src/preprocess.cpp
+                                src/GNSS_Processing.cpp
                                 )
-target_link_libraries(fastlivo_mapping ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${PYTHON_LIBRARIES} vio ikdtree)
+target_link_libraries(fastlivo_mapping ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${PYTHON_LIBRARIES} ${CERES_LIBRARIES} vio ikdtree)
 target_include_directories(fastlivo_mapping PRIVATE ${PYTHON_INCLUDE_DIRS})
 
 

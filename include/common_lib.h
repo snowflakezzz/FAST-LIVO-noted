@@ -8,6 +8,7 @@
 #include <fast_livo/States.h>
 #include <fast_livo/Pose6D.h>
 #include <sensor_msgs/Imu.h>
+#include <sensor_msgs/NavSatFix.h>
 #include <cv_bridge/cv_bridge.h>
 #include <nav_msgs/Odometry.h>
 #include <tf/transform_broadcaster.h>
@@ -139,11 +140,20 @@ namespace std
   };
 }
 
+struct GNSS
+{
+    double time = -1.0;
+    Vector3d blh;
+    Vector3d std;
+};
+
+
 // 存储图像及IMU数据
 struct MeasureGroup     
 {
     double img_offset_time;                     // 图像时间戳与lidar扫描开始时间的差值
     deque<sensor_msgs::Imu::ConstPtr> imu;
+    sensor_msgs::NavSatFixConstPtr gnss;
     cv::Mat img;
     MeasureGroup()
     {

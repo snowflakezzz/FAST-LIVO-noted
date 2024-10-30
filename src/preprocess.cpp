@@ -271,7 +271,7 @@ void Preprocess::velodyne_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
     pl_surf.reserve(plsize);
 
     /*** These variables only works when no point timestamps given ***/
-    double omega_l = 0.361 * 10;       // scan angular velocity 10Hz
+    double omega_l = 0.361 * 10;       // scan angular velocity 度/s 10Hz
     std::vector<bool> is_first(N_SCANS,true);
     std::vector<double> yaw_fp(N_SCANS, 0.0);      // yaw of first scan point
     std::vector<float> yaw_last(N_SCANS, 0.0);   // yaw of last scan point
@@ -282,10 +282,11 @@ void Preprocess::velodyne_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
     {
       given_offset_time = true;
     }
-    else
+    else    // 如果没有给出雷达点的扫描时间戳
     {
       given_offset_time = false;
-      double yaw_first = atan2(pl_orig.points[0].y, pl_orig.points[0].x) * 57.29578;
+      // 记录视场角起始角度
+      double yaw_first = atan2(pl_orig.points[0].y, pl_orig.points[0].x) * 57.29578;  // 57.29578用于度转弧度
       double yaw_end  = yaw_first;
       int layer_first = pl_orig.points[0].ring;
       for (uint i = plsize - 1; i > 0; i--)
@@ -298,7 +299,7 @@ void Preprocess::velodyne_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
       }
     }
 
-    if(feature_enabled)
+    if(feature_enabled)   // 是否进行特征提取
     {
       for (int i = 0; i < N_SCANS; i++)
       {
@@ -386,8 +387,7 @@ void Preprocess::velodyne_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
         added_pt.y = pl_orig.points[i].y;
         added_pt.z = pl_orig.points[i].z;
         added_pt.intensity = pl_orig.points[i].intensity;
-        added_pt.curvature = pl_orig.points[i].time * 1.e-3f;  // curvature unit: ms // 
-
+        added_pt.curvature = pl_orig.points[i].time * 1.e-3f;  // curvature unit: ms 存储当前点的相对于当前帧起始时间的时间偏差 没有值？
         if (!given_offset_time)
         {
           int layer = pl_orig.points[i].ring;

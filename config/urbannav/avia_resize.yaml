@@ -1,0 +1,53 @@
+feature_extract_enable : 0
+point_filter_num : 2
+max_iteration : 10
+dense_map_enable : 1
+filter_size_surf : 0.15
+filter_size_map : 0.3
+cube_side_length : 20
+grid_size : 20  # 40
+patch_size : 4   # 8
+img_enable : 1
+lidar_enable : 1
+outlier_threshold : 300 # 78 100 156
+ncc_en: false
+ncc_thre: 0
+img_point_cov : 100 # 1000
+laser_point_cov : 0.001 # 0.001
+delta_time: 0.0                     # camera与lidar时偏 =lidar时间 - camera时间
+
+common:
+    lid_topic:  "/velodyne_points"
+    imu_topic:  "/imu/data"
+
+preprocess:
+    lidar_type: 2 # 1:Livox Avia LiDAR  2:VELO16  3:OUST64  4:XT32 
+    scan_line: 32 # 16  64  32
+    blind: 4 # blind x m disable
+
+mapping:
+    acc_cov_scale: 100      # imu方差
+    gyr_cov_scale: 10000
+    # imu to lidar
+    extrinsic_T: [0,0,0] # horizon 0.05512, 0.02226, -0.0297
+    extrinsic_R: [ 1, 0, 0,
+                   0, 1, 0,
+                   0, 0, 1]
+
+
+
+pcd_save:
+    pcd_save_en: true
+
+camera:
+    img_topic: /camera/image_color
+    # imu to camera
+    # Rcl: [0.00162756,-0.999991,0.00390957,
+    #      -0.0126748,-0.00392989,-0.999912,
+    #       0.999918,0.00157786,-0.012681]
+    # Pcl: [0.0409257, 0.0318424, -0.0927219]
+    # body to image
+    extrinsic_T: [-1.7434527332030676e-02, 1.7171139776467173e-01, -4.5251036141047592e-02]
+    extrinsic_R: [9.9934608718980233e-01, -1.5715484428488590e-02,-3.2564114721728155e-02, 
+                 3.2359037356803094e-02, -1.3131917124154624e-02,9.9939003669937865e-01, 
+                -1.6133527815482926e-02, -9.9979026615676858e-01,-1.2614792047622947e-02]

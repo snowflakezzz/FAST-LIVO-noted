@@ -1,0 +1,23 @@
+# cam_model: Pinhole    信息工程大学mini
+# cam_width: 1280
+# cam_height: 1024
+# cam_fx: 760.5469
+# cam_fy: 760.772
+# cam_cx: 649.9081
+# cam_cy: 486.5999
+# cam_d0: -0.3553             #径向
+# cam_d1: 0.167
+# cam_d2: 0.00013946         #切向
+# cam_d3: 0.00027632
+
+cam_model: Pinhole
+cam_width: 1920
+cam_height: 1200
+cam_fx: 1086.160899
+cam_fy: 1090.242963
+cam_cx: 940.067502
+cam_cy: 586.740077
+cam_d0: -0.109203             #径向
+cam_d1: 0.063536
+cam_d2: -0.003427         #切向
+cam_d3: -0.000629

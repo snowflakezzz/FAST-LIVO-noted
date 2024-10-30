@@ -24,11 +24,11 @@ class LidarSelector {
     SparseMap* sparse_map;
     StatesGroup* state;
     StatesGroup* state_propagat;
-    M3D Rli, Rci, Rcw, Jdphi_dR, Jdp_dt, Jdp_dR;  // camera到world系
+    M3D Rli, Rci, Rcw, Jdphi_dR, Jdp_dt, Jdp_dR;  // world系到camera的旋转矩阵，平移向量
     V3D Pli, Pci, Pcw;
     int* align_flag;
     int* grid_num;
-    int* map_index;
+    int* map_index;                               // 格网索引
     float* map_dist;                              // 当前帧各个格网中到光心最近的地图点
     float* map_value;
     float* patch_cache;

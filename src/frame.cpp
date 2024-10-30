@@ -72,9 +72,8 @@ void Frame::addFeature(FeaturePtr ftr)
 void Frame::setKeyPoints()
 {
   for(size_t i = 0; i < 5; ++i)
-    if(key_pts_[i] != nullptr)
-      if(key_pts_[i]->point == nullptr)
-        key_pts_[i] = nullptr;
+    if(key_pts_[i] != nullptr && key_pts_[i]->point == nullptr)
+      key_pts_[i] = nullptr;
   std::for_each(fts_.begin(), fts_.end(), [&](FeaturePtr ftr){ if(ftr->point != nullptr) checkKeyPoints(ftr); });
 }
 
