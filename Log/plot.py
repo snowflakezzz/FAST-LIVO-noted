@@ -18,12 +18,12 @@ axs[1,1].set_title('ba')
 axs[2,1].set_title('Gravity')
 for i in range(1,4):
     for j in range(6):
-        axs[j%3, j/3].plot(time, a_pre[:,i+j*3],'.-', label=lab_pre[i])
-        axs[j%3, j/3].plot(time, a_out[:,i+j*3],'.-', label=lab_out[i])
+        # axs[j%3, int(j/3)].plot(time, a_pre[:,i+j*3],'.-', label=lab_pre[i])
+        axs[j%3, int(j/3)].plot(time, a_out[:,i+j*3],'.-', label=lab_out[i])
 for j in range(6):
     # axs[j].set_xlim(386,389)
-    axs[j%3, j/3].grid()
-    axs[j%3, j/3].legend()
+    axs[j%3, int(j/3)].grid()
+    axs[j%3, int(j/3)].legend()
 plt.grid()
 
 

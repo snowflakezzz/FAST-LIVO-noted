@@ -37,7 +37,7 @@ pcd_save:
     pcd_save_en: false
 
 camera:
-    img_topic: /left_camera/image
+    img_topic: /right_camera/image/compressed
     Rcl: [0.00162756,-0.999991,0.00390957,
          -0.0126748,-0.00392989,-0.999912,
           0.999918,0.00157786,-0.012681]

@@ -31,8 +31,6 @@ ImuProcess::ImuProcess()
   Lid_offset_to_IMU = Zero3d;
   Lid_rot_to_IMU    = Eye3d;
   last_imu_.reset(new sensor_msgs::Imu());
-
-  gnss_handler_ = make_shared<GNSSProcessing>();
 }
 
 ImuProcess::~ImuProcess() {}
@@ -91,14 +89,59 @@ void ImuProcess::set_acc_bias_cov(const V3D &b_a)
   cov_bias_acc = b_a;
 }
 
+bool ImuProcess::detectZeroVelocity(const MeasureGroup &meas)
+{
+  int N = init_iter_num;
+  Vector3d cur_acc, cur_gyr;
+  for (const auto &it : meas.imu){
+    auto &imu_acc = it->linear_acceleration;
+    auto &imu_gyr = it->angular_velocity;
+    cur_acc << imu_acc.x, imu_acc.y, imu_acc.z;
+    cur_gyr << imu_gyr.x, imu_gyr.y, imu_gyr.z;
+
+    if(N == 1){ // 首帧
+      mean_acc = cur_acc;
+      mean_gyr = cur_gyr;
+    }
+    mean_acc += (cur_acc - mean_acc) / N;
+    mean_gyr += (cur_gyr - mean_gyr) / N;
+
+    cov_acc = cov_acc*(N-1.0) / N + (cur_acc-mean_acc).cwiseProduct(cur_acc-mean_acc)*(N-1.0)/(N*N);
+    cov_gyr = cov_gyr*(N-1.0) / N + (cur_gyr-mean_gyr).cwiseProduct(cur_gyr-mean_gyr)*(N-1.0)/(N*N);
+    N ++;
+  }
+  init_iter_num = N;
+
+  // 使用比力和角速度的摸进行零速检测 检测阈值与数据类型相关？如何自适应检测
+  if((abs(mean_acc.norm()-G_m_s2) < 0.1) && (abs(mean_gyr.norm()) < 0.1))
+    return true;
+  // if((cov_acc.x() < ZERO_VELOCITY_ACC_THRESHOLD) && (cov_acc.y() < ZERO_VELOCITY_ACC_THRESHOLD) &&
+  //     (cov_acc.z() < ZERO_VELOCITY_ACC_THRESHOLD) && (cov_gyr.x() < ZERO_VELOCITY_GYR_THRESHOLD) &&
+  //     (cov_gyr.y() < ZERO_VELOCITY_GYR_THRESHOLD) && (cov_gyr.z() < ZERO_VELOCITY_GYR_THRESHOLD))
+  //     return true;    
+  
+  return false;
+}
+
 void ImuProcess::IMU_init(const MeasureGroup &meas, StatesGroup &state_inout, int &N)
 {
-  gnss_handler_->input_imu(meas.imu);
-
   last_imu_   = meas.imu.back();
 
-  bool is_eular_right = false;
-  if(gnss_handler_->Initialization(mean_acc, mean_gyr, cov_acc, cov_gyr, is_eular_right)){
+  bool is_zero_velocity = detectZeroVelocity(meas);
+
+  if(!is_zero_velocity){
+    cout << "Please wait until IMU init! ";
+    Reset();
+    return;
+  }
+
+  if(init_iter_num < 200) {
+    std::cout << "processing %.1f" << init_iter_num/200 << endl;
+    return;
+  }
+
+  if(is_zero_velocity)
+  {
     state_inout.gravity = - mean_acc / mean_acc.norm() * G_m_s2;
 
     state_inout.rot_end = Eye3d;
@@ -536,7 +579,6 @@ void ImuProcess::Process2(LidarMeasureGroup &lidar_meas, StatesGroup &stat, Poin
   t1 = omp_get_wtime();
   ROS_ASSERT(lidar_meas.lidar != nullptr);
   MeasureGroup meas = lidar_meas.measures.back();   // 最新一帧imu观测
-  if(meas.gnss) gnss_handler_->input_gnss(meas.gnss);
   // imu初始化
   if (imu_need_init_)
   {

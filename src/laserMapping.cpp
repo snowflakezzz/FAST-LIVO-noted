@@ -69,6 +69,7 @@
 #include <sensor_msgs/CompressedImage.h>
 #include <sensor_msgs/NavSatFix.h>
 #include <cv_bridge/cv_bridge.h>
+#include "GNSS_Processing.h"
 
 #ifdef USE_ikdtree
     #ifdef USE_ikdforest
@@ -100,7 +101,7 @@ condition_variable sig_buffer;
 // mutex mtx_buffer_pointcloud;
 
 string root_dir = ROOT_DIR;
-string map_file_path, lid_topic, imu_topic, img_topic, gnss_topic, config_file;
+string map_file_path, lid_topic, imu_topic, img_topic, config_file;
 bool bgnss_en;
 M3D Eye3d(M3D::Identity());
 M3F Eye3f(M3F::Identity());
@@ -211,6 +212,7 @@ geometry_msgs::Quaternion geoQuat;
 geometry_msgs::PoseStamped msg_body_pose;
 
 shared_ptr<Preprocess> p_pre(new Preprocess());
+GNSSProcessing::Ptr p_gnss;
 
 PointCloudXYZRGB::Ptr pcl_wait_save(new PointCloudXYZRGB());  //add save rbg map
 PointCloudXYZI::Ptr pcl_wait_save_lidar(new PointCloudXYZI());  //add save xyzi map
@@ -467,12 +469,6 @@ void livox_pcl_cbk(const livox_ros_driver::CustomMsg::ConstPtr &msg)
     sig_buffer.notify_all();
 }
 
-deque<sensor_msgs::NavSatFixConstPtr> gnss_buffer;
-void gnss_cbk(const sensor_msgs::NavSatFix::ConstPtr& msg_in){
-    sensor_msgs::NavSatFixConstPtr msg(new sensor_msgs::NavSatFix(*msg_in));
-    gnss_buffer.push_back(msg);
-}
-
 void imu_cbk(const sensor_msgs::Imu::ConstPtr &msg_in) 
 {
     publish_count ++;
@@ -594,9 +590,6 @@ bool sync_packages(LidarMeasureGroup &meas)
 
     // step2 存入imu数据
     struct MeasureGroup m;
-    while(!gnss_buffer.empty() && gnss_buffer.front()->header.stamp.toSec()<last_timestamp_imu){
-        gnss_buffer.pop_front();
-    }
 
     // step2.1 如果当前不存在image数据，或图像帧在当前lidar帧后
     if (img_buffer.empty() || (img_time_buffer.front()>lidar_end_time) )
@@ -609,12 +602,6 @@ bool sync_packages(LidarMeasureGroup &meas)
         double imu_time = imu_buffer.front()->header.stamp.toSec();
         m.imu.clear();
         mtx_buffer.lock();
-        // 存入gnss观测数据
-        if(!gnss_buffer.empty() && gnss_buffer.front()->header.stamp.toSec()<lidar_end_time){
-            m.gnss = gnss_buffer.front();
-            gnss_buffer.pop_front();
-        } 
-
         while ((!imu_buffer.empty() && (imu_time<lidar_end_time))) 
         {
             imu_time = imu_buffer.front()->header.stamp.toSec();
@@ -643,12 +630,6 @@ bool sync_packages(LidarMeasureGroup &meas)
         m.img_offset_time = img_start_time - meas.lidar_beg_time; // record img offset time, it shoule be the Kalman update timestamp.
         m.img = img_buffer.front();
         mtx_buffer.lock();
-        // 存入gnss观测数据
-        if(!gnss_buffer.empty() && gnss_buffer.front()->header.stamp.toSec()<img_start_time){
-            m.gnss = gnss_buffer.front();
-            gnss_buffer.pop_front();
-        } 
-
         while ((!imu_buffer.empty() && (imu_time<img_start_time))) 
         {
             imu_time = imu_buffer.front()->header.stamp.toSec();
@@ -892,7 +873,8 @@ void publish_odometry(const ros::Publisher & pubOdomAftMapped)
 {
     odomAftMapped.header.frame_id = "camera_init";
     odomAftMapped.child_frame_id = "aft_mapped";
-    odomAftMapped.header.stamp = ros::Time::now();//.ros::Time()fromSec(last_timestamp_lidar);
+    // odomAftMapped.header.stamp = ros::Time::now();//.ros::Time()fromSec(last_timestamp_lidar);
+    odomAftMapped.header.stamp = ros::Time().fromSec(LidarMeasures.last_update_time);
     set_posestamp(odomAftMapped.pose.pose);
     // odomAftMapped.twist.twist.linear.x = state_point.vel(0);
 // odomAftMapped.twist.twist.linear.y = state_point.vel(1);
@@ -1090,7 +1072,6 @@ void readParameters(ros::NodeHandle &nh)
     nh.param<string>("common/imu_topic", imu_topic,"/livox/imu");
     nh.param<string>("camera/img_topic", img_topic,"/left_camera/image");
     nh.param<bool>("gnss_en", bgnss_en, false);
-    if(bgnss_en) nh.param<string>("common/gnss_topic", gnss_topic,"/navsat/fix");
     nh.param<double>("filter_size_corner",filter_size_corner_min,0.5);
     nh.param<double>("filter_size_surf",filter_size_surf_min,0.5);
     nh.param<double>("filter_size_map",filter_size_map_min,0.5);
@@ -1176,8 +1157,6 @@ int main(int argc, char** argv)
     ros::Subscriber sub_img = idx == string::npos ? \
                 nh.subscribe(img_topic, 200000, img_cbk) : \
                 nh.subscribe(img_topic, 200000, comimg_cbk);
-    // gnss数据
-    if(bgnss_en) ros::Subscriber sub_gnss = nh.subscribe("/gnss/gnss_2d", 200000, gnss_cbk);
 
     // ros::Subscriber sub_img = nh.subscribe(img_topic, 200000, img_cbk);
     image_transport::Publisher img_pub = it.advertise("/rgb_img", 1);
@@ -1225,6 +1204,8 @@ int main(int argc, char** argv)
     #endif
 
     shared_ptr<ImuProcess> p_imu(new ImuProcess());
+    if(bgnss_en)    p_gnss = make_shared<GNSSProcessing>(nh);
+
     Lidar_offset_to_IMU<<VEC_FROM_ARRAY(extrinT);
     Lidar_rot_to_IMU<<MAT_FROM_ARRAY(extrinR);
     lidar_selection::LidarSelectorPtr lidar_selector(new lidar_selection::LidarSelector(grid_size, new SparseMap));
@@ -1274,7 +1255,7 @@ int main(int argc, char** argv)
 
     ofstream fout_pre, fout_out, fout_dbg;
     fout_pre.open(DEBUG_FILE_DIR("mat_pre.txt"),ios::out);
-    fout_out.open(DEBUG_FILE_DIR("mat_out.txt"),ios::out);
+    fout_out.open(DEBUG_FILE_DIR("mat_out.txt"),ios::out);      // 优化后的位姿结果
     fout_dbg.open(DEBUG_FILE_DIR("dbg.txt"),ios::out);
     // if (fout_pre && fout_out)
     //     cout << "~~~~"<<ROOT_DIR<<" file opened" << endl;
@@ -1350,7 +1331,8 @@ int main(int argc, char** argv)
         fast_lio_is_ready = true;
         flg_EKF_inited = (LidarMeasures.lidar_beg_time - first_lidar_time) < INIT_TIME ? \
                         false : true;
-        
+        if(bgnss_en) p_gnss->Initialization(p_imu->mean_acc);
+
         // step4 处理视觉观测信息
         if (! LidarMeasures.is_lidar_end) 
         {
@@ -1392,7 +1374,7 @@ int main(int argc, char** argv)
                 geoQuat = tf::createQuaternionMsgFromRollPitchYaw(euler_cur(0), euler_cur(1), euler_cur(2));
                 publish_odometry(pubOdomAftMapped);
                 euler_cur = RotMtoEuler(state.rot_end);
-                fout_out << setw(20) << LidarMeasures.last_update_time - first_lidar_time << " " << euler_cur.transpose()*57.3 << " " << state.pos_end.transpose() << " " << state.vel_end.transpose() \
+                fout_out << fixed << setprecision(6) << setw(20) << LidarMeasures.last_update_time << " " << euler_cur.transpose()*57.3 << " " << state.pos_end.transpose() << " " << state.vel_end.transpose() \
                 <<" "<<state.bias_g.transpose()<<" "<<state.bias_a.transpose()<<" "<<state.gravity.transpose()<<" "<<feats_undistort->points.size()<<endl;
             }
             continue;
@@ -1744,7 +1726,7 @@ int main(int argc, char** argv)
             fout_out << setw(20) << LidarMeasures.last_update_time - first_lidar_time << " " << euler_cur.transpose()*57.3 << " " << state_point.pos.transpose() << " " << state_point.vel.transpose() \
             <<" "<<state_point.bg.transpose()<<" "<<state_point.ba.transpose()<<" "<<state_point.grav<<" "<<feats_undistort->points.size()<<endl;
             #else
-            fout_out << setw(20) << LidarMeasures.last_update_time - first_lidar_time << " " << euler_cur.transpose()*57.3 << " " << state.pos_end.transpose() << " " << state.vel_end.transpose() \
+            fout_out << fixed << setprecision(6) << setw(20) << LidarMeasures.last_update_time << " " << euler_cur.transpose()*57.3 << " " << state.pos_end.transpose() << " " << state.vel_end.transpose() \
             <<" "<<state.bias_g.transpose()<<" "<<state.bias_a.transpose()<<" "<<state.gravity.transpose()<<" "<<feats_undistort->points.size()<<endl;
             #endif
         }

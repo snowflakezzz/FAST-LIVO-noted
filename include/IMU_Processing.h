@@ -27,8 +27,6 @@
 #include <fast_livo/States.h>
 #include <geometry_msgs/Vector3.h>
 
-#include "GNSS_Processing.h"
-
 #ifdef USE_IKFOM
 #include "use-ikfom.hpp"
 #endif
@@ -60,7 +58,8 @@ class ImuProcess
   void Process2(LidarMeasureGroup &lidar_meas, StatesGroup &stat, PointCloudXYZI::Ptr cur_pcl_un_);
   void UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_inout, PointCloudXYZI &pcl_out);
 
-  ros::NodeHandle nh;
+  bool detectZeroVelocity(const MeasureGroup &meas);
+
   ofstream fout_imu;
   V3D cov_acc;
   V3D cov_gyr;
@@ -70,17 +69,11 @@ class ImuProcess
   V3D cov_bias_acc;
   double first_lidar_time;
 
-  GNSSProcessing::Ptr gnss_handler_;
+  // GNSSProcessing::Ptr gnss_handler_;
 
- private:
- #ifdef USE_IKFOM
-  void IMU_init(const MeasureGroup &meas, esekfom::esekf<state_ikfom, 12, input_ikfom> &kf_state, int &N);
-  void UndistortPcl(const MeasureGroup &meas, esekfom::esekf<state_ikfom, 12, input_ikfom> &kf_state, PointCloudXYZI &pcl_in_out);
-  #else
   void IMU_init(const MeasureGroup &meas, StatesGroup &state, int &N);
   void Forward(const MeasureGroup &meas, StatesGroup &state_inout, double pcl_beg_time, double end_time);
   void Backward(const LidarMeasureGroup &lidar_meas, StatesGroup &state_inout, PointCloudXYZI &pcl_out);
-  #endif
 
   PointCloudXYZI::Ptr cur_pcl_un_;
   sensor_msgs::ImuConstPtr last_imu_;

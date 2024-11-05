@@ -1,11 +1,26 @@
+/*
+ * @file: 
+ * @brief:  
+ * @details: 
+ * @author: Xueqing Zhang. Email: zxq@whu.edu.cn
+ * @date : Do not edit
+ * @version: 
+ * @par: Copyright(c) 2012-2021 School of Geodesy and Geomatics, University of Wuhan. All Rights Reserved. 
+ * POSMind Software Kernel, named IPS (Inertial Plus Sensing), this file is a part of IPS.
+ */
 #ifndef GNSS_PROCESSING_H
 #define GNSS_PROCESSING_H
 
 #include "earth.h"
 #include "common_lib.h"
+#include "Factors.h"
+#include <ros/ros.h>
 #include <sensor_msgs/NavSatFix.h>
+#include <nav_msgs/Odometry.h>
 #include <sensor_msgs/Imu.h>
 #include <ceres/ceres.h>
+#include <mutex>
+#include <thread>
 
 class GNSSProcessing
 {
@@ -14,31 +29,38 @@ public:
 
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
-    GNSSProcessing();
+    GNSSProcessing(ros::NodeHandle& nh);
     ~GNSSProcessing();
 
-    void input_gnss(const sensor_msgs::NavSatFixConstPtr& gnss);
+    void input_gnss(const sensor_msgs::NavSatFix::ConstPtr& msg_in);
 
-    void input_imu(const deque<sensor_msgs::Imu::ConstPtr>& imu);
+    void input_path(const nav_msgs::Odometry::ConstPtr& msg_in);
 
-    bool Initialization(Vector3d &mean_acc, Vector3d &mean_gyr, Vector3d &cov_acc, Vector3d &cov_gyr, bool is_eular);
+    void Initialization(Vector3d &mean_acc);
 
-    void process(const vector<Pose6D>& imu_pos, const double pcl_beg_time);
+    bool optimize();
     
 private:
-    Vector3d    anchor_;       // 锚点
-    bool        is_origin_set;     // 是否已经设置了锚点
-    Vector3d    eular_;
+    Vector3d            anchor_;        // 锚点
+    bool                is_origin_set;  // 是否已经设置了锚点
+    bool                is_has_yaw_;    // 是否有yaw角
+    vector<double>      eular_;         // gnss->imu轨迹的欧拉角 roll pitch yaw
+    Vector3d            antlever_;      // 杆臂
 
-    GNSS    gnss_;
-    GNSS    last_gnss_;
+    bool                new_gnss_;
+    std::thread         thread_opt_;
 
-    deque<sensor_msgs::Imu::ConstPtr> imu_buffer_;
-    bool    is_has_zero_velocity;
+    ros::Subscriber odo_sub_;
+    ros::Subscriber gnss_sub_;
+    std::map<double, Vector3d> odo_path_;
+    std::map<double, GNSS> gnss_buffer_;
+    std::queue<GNSS> gnss_queue_;
 
-    bool detectZeroVelocity(Vector3d &mean_acc, Vector3d &mean_gyr, Vector3d &cov_acc, Vector3d &cov_gyr);
+    mutex odo_mutex_;
+    mutex gnss_mutex_;
 
-    void optimize();
+    void gnssOutlierCullingByChi2(ceres::Problem & problem,
+                            vector<std::pair<ceres::ResidualBlockId, GNSS>> &residual_block);
 };
 
 #endif
