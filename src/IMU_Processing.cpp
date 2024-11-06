@@ -99,6 +99,10 @@ bool ImuProcess::detectZeroVelocity(const MeasureGroup &meas)
     cur_acc << imu_acc.x, imu_acc.y, imu_acc.z;
     cur_gyr << imu_gyr.x, imu_gyr.y, imu_gyr.z;
 
+    ofstream fout(DEBUG_FILE_DIR("imu_out.txt"),ios::app);
+    fout << cur_acc.transpose() << " " << cur_gyr.transpose() << endl;
+    fout.close();
+
     if(N == 1){ // 首帧
       mean_acc = cur_acc;
       mean_gyr = cur_gyr;
@@ -135,16 +139,35 @@ void ImuProcess::IMU_init(const MeasureGroup &meas, StatesGroup &state_inout, in
     return;
   }
 
-  if(init_iter_num < 200) {
-    std::cout << "processing %.1f" << init_iter_num/200 << endl;
+  if(init_iter_num < 50) {
+    printf("processing %.1f \n", init_iter_num/50);
+    // std::cout << "processing %.1f" << init_iter_num/200 << endl;
     return;
   }
 
   if(is_zero_velocity)
   {
-    state_inout.gravity = - mean_acc / mean_acc.norm() * G_m_s2;
+    Vector3d gdir = Vector3d(0, 0, -1.0);
+    state_inout.gravity = -1.0 * gdir * G_m_s2;  // 重力得和imu系相反，因为UndistortPcl
 
-    state_inout.rot_end = Eye3d;
+    // 首帧调整为水平方向，todo：杆臂也得调整
+    Vector3d diracc = mean_acc / mean_acc.norm();
+    Vector3d axis = gdir.cross(diracc);
+    axis  /= axis.norm();
+    double cosg = gdir.dot(diracc);
+    double ang = acos(cosg);
+    M3D R_g_imu = AngleAxisd(ang, axis).matrix();
+    // Vector3d acc_norm = mean_acc.normalized();
+    // double roll = -asin(acc_norm.y());  // 绕x轴旋转   // 因为imu坐标系z轴是反的，所以该方法会
+    // double pitch = asin(acc_norm.x());  // 绕y轴旋转
+    // M3D R_g_imu = Matrix3d(Eigen::AngleAxisd(pitch, Vector3d::UnitY()) *
+    //                         Eigen::AngleAxisd(roll, Vector3d::UnitX()));
+
+    ofstream fout(DEBUG_FILE_DIR("init.txt"),ios::app);
+    fout << "R_g_imu: " << endl << R_g_imu << endl;
+    fout.close();
+
+    state_inout.rot_end = R_g_imu;
     state_inout.bias_g  = mean_gyr;
 
     cov_acc = cov_acc * pow(G_m_s2 / mean_acc.norm(), 2);
@@ -199,7 +222,7 @@ void ImuProcess::Forward(const MeasureGroup &meas, StatesGroup &state_inout, dou
     last_acc = acc_avr;
     last_ang = angvel_avr;
     // #ifdef DEBUG_PRINT
-      fout_imu << setw(10) << head->header.stamp.toSec() - first_lidar_time << " " << angvel_avr.transpose() << " " << acc_avr.transpose() << endl;
+    fout_imu << setw(10) << head->header.stamp.toSec() - first_lidar_time << " " << angvel_avr.transpose() << " " << acc_avr.transpose() << endl;
     // #endif
 
     angvel_avr -= state_inout.bias_g;
@@ -459,8 +482,9 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
       fout_imu << setw(10) << head->header.stamp.toSec() - first_lidar_time << " " << angvel_avr.transpose() << " " << acc_avr.transpose() << endl;
     // #endif
 
+    // 零偏修正
     angvel_avr -= state_inout.bias_g;
-    acc_avr     = acc_avr * G_m_s2 / mean_acc.norm() - state_inout.bias_a;
+    acc_avr     = acc_avr * G_m_s2 / mean_acc.norm() - state_inout.bias_a;    // G_m_s2 / mean_acc.norm()相当于修正了一个轴系误差
 
     if(head->header.stamp.toSec() < last_lidar_end_time_)
     {
@@ -496,7 +520,7 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
     /* propogation of IMU attitude */
     R_imu = R_imu * Exp_f;
 
-    /* Specific acceleration (global frame) of IMU */
+    /* Specific acceleration (global frame) of IMU  先将加速度转到global坐标系下，然后修正重力*/
     acc_imu = R_imu * acc_avr + state_inout.gravity;
 
     /* propogation of IMU */

@@ -6,30 +6,30 @@
 #include <Eigen/Geometry>
 #include <Eigen/Dense>
 #include <Eigen/Core>
+#include <fstream>
+#include "common_lib.h"
 
-class GnssFactor : public ceres::SizedCostFunction<3, 3, 1>{
+class GnssFactor : public ceres::SizedCostFunction<3, 3>{
 public:
     GnssFactor() = delete;
 
-    explicit GnssFactor(const GNSS& gnss_data, Vector3d lever, double pitch, double roll)
+    explicit GnssFactor(const GNSS& gnss_data, Vector3d lever, double yaw)
      : gnss_(std::move(gnss_data)), lever_(std::move(lever)),
-     pitch_(std::move(pitch)), roll_(std::move(roll)) {}
+     yaw_(std::move(yaw)) {}
 
     bool Evaluate(const double *const *parameters, double *residuals, double **jacobians) const override {
         Vector3d p{parameters[0][0], parameters[0][1], parameters[0][2]};
-        double yaw = parameters[1][0];
 
         Eigen::Map<Eigen::Matrix<double, 3, 1>> error(residuals);
 
-        // Vector3d euler_angles = Vector3d(roll_, pitch_, yaw);
-        Eigen::Matrix3d R_z, R_y, R_x;
-        R_x << 1, 0, 0, 0, cos(roll_), -sin(roll_), 0, sin(roll_), cos(roll_);
-        R_y << cos(pitch_), 0, sin(pitch_), 0, 1, 0, -sin(pitch_), 0, cos(pitch_);
-        R_z << cos(yaw), -sin(yaw), 0, sin(yaw), cos(yaw), 0, 0, 0, 1;
+        Eigen::Matrix3d R_gnss_odo;
+        R_gnss_odo << cos(yaw_), -sin(yaw_), 0, sin(yaw_), cos(yaw_), 0, 0, 0, 1;
 
-        Eigen::Matrix3d R_gnss_global = R_z*R_y*R_x;
+        error = p + lever_ - R_gnss_odo.transpose() * gnss_.blh;
 
-        error = p + lever_ - R_gnss_global * gnss_.blh;
+        ofstream fout(DEBUG_FILE_DIR("residual.txt"), std::ios::app);
+        fout << "gnss factor residual: " << error.transpose() << endl;
+        fout.close();
 
         Matrix3d sqrt_info_ = Matrix3d::Identity();     // 设定权重
         sqrt_info_(0,0) /= gnss_.std[0];
@@ -44,14 +44,6 @@ public:
                 jacobians[0][3] = 0.0;  jacobians[0][4] = 1.0;  jacobians[0][5] = 0.0;
                 jacobians[0][6] = 0.0;  jacobians[0][7] = 0.0;  jacobians[0][8] = 1.0;
             }
-            if(jacobians[1]) {
-                Eigen::Matrix3d J_yaw;
-                J_yaw << -sin(yaw), -cos(yaw), 0, cos(yaw), -sin(yaw), 0, 0, 0, 0;
-                auto tmp = -1.0 * J_yaw * R_y * R_x * gnss_.blh;
-                jacobians[1][0] = tmp.x();
-                jacobians[1][1] = tmp.y();
-                jacobians[1][2] = tmp.z();
-            }
         }
 
         return true;
@@ -60,8 +52,7 @@ public:
 private:
     GNSS gnss_;
     Vector3d lever_;
-    double pitch_;
-    double roll_;
+    double yaw_;            // gnss to odo
 };
 
 class OdoFactor : public ceres::SizedCostFunction<3, 3, 3>{
@@ -78,6 +69,11 @@ public:
         Eigen::Map<Eigen::Matrix<double, 3, 1>> error(residuals);
 
         error = p2 - p1 - delta_t_;
+
+        ofstream fout(DEBUG_FILE_DIR("residual.txt"), std::ios::app);
+        fout << "odo factor residual: " << error.transpose() << endl;
+        fout.close();
+
         error = error*t_var_;
 
         if(jacobians) {

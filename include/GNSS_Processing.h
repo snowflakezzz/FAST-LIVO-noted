@@ -36,15 +36,15 @@ public:
 
     void input_path(const nav_msgs::Odometry::ConstPtr& msg_in);
 
-    void Initialization(Vector3d &mean_acc);
+    void Initialization();
 
     bool optimize();
     
 private:
-    Vector3d            anchor_;        // 锚点
+    Vector3d            anchor_;        // 锚点，弧度制
     bool                is_origin_set;  // 是否已经设置了锚点
     bool                is_has_yaw_;    // 是否有yaw角
-    vector<double>      eular_;         // gnss->imu轨迹的欧拉角 roll pitch yaw
+    double              yaw_;           // gnss to odo的航偏角
     Vector3d            antlever_;      // 杆臂
 
     bool                new_gnss_;
@@ -54,6 +54,7 @@ private:
     ros::Subscriber gnss_sub_;
     std::map<double, Vector3d> odo_path_;
     std::map<double, GNSS> gnss_buffer_;
+    double last_gnss_time_;
     std::queue<GNSS> gnss_queue_;
 
     mutex odo_mutex_;

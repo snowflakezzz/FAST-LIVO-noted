@@ -1987,7 +1987,7 @@ private:
             temp_vec.setZero();
             return temp_vec;
         }
-        double angular_dis = temp_vec.block( 0, 0, 3, 1 ).norm() * 57.3;
+        double angular_dis = temp_vec.block( 0, 0, 3, 1 ).norm() * R2D;
         double pos_dis = temp_vec.block( 3, 0, 3, 1 ).norm();
         if ( angular_dis >= 20 || pos_dis > 1 )
         {

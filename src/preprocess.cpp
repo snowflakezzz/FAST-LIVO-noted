@@ -194,7 +194,7 @@ void Preprocess::oust64_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
       added_pt.normal_x = 0;
       added_pt.normal_y = 0;
       added_pt.normal_z = 0;
-      double yaw_angle = atan2(added_pt.y, added_pt.x) * 57.3;
+      double yaw_angle = atan2(added_pt.y, added_pt.x) * R2D;
       if (yaw_angle >= 180.0)
         yaw_angle -= 360.0;
       if (yaw_angle <= -180.0)

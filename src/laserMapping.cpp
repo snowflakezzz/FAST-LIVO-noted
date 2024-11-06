@@ -1331,7 +1331,6 @@ int main(int argc, char** argv)
         fast_lio_is_ready = true;
         flg_EKF_inited = (LidarMeasures.lidar_beg_time - first_lidar_time) < INIT_TIME ? \
                         false : true;
-        if(bgnss_en) p_gnss->Initialization(p_imu->mean_acc);
 
         // step4 处理视觉观测信息
         if (! LidarMeasures.is_lidar_end) 
@@ -1344,7 +1343,7 @@ int main(int argc, char** argv)
             // cout<<"cur state:"<<state.rot_end<<endl;
             if (img_en) {
                 euler_cur = RotMtoEuler(state.rot_end);
-                fout_pre << setw(20) << LidarMeasures.last_update_time - first_lidar_time << " " << euler_cur.transpose()*57.3 << " " << state.pos_end.transpose() << " " << state.vel_end.transpose() \
+                fout_pre << setw(20) << LidarMeasures.last_update_time - first_lidar_time << " " << euler_cur.transpose()*R2D << " " << state.pos_end.transpose() << " " << state.vel_end.transpose() \
                                 <<" "<<state.bias_g.transpose()<<" "<<state.bias_a.transpose()<<" "<<state.gravity.transpose()<< endl;
                 // step4.1 视觉追踪、残差构建、state位姿优化更新
                 lidar_selector->detect(LidarMeasures.measures.back().img, pcl_wait_pub);
@@ -1374,7 +1373,7 @@ int main(int argc, char** argv)
                 geoQuat = tf::createQuaternionMsgFromRollPitchYaw(euler_cur(0), euler_cur(1), euler_cur(2));
                 publish_odometry(pubOdomAftMapped);
                 euler_cur = RotMtoEuler(state.rot_end);
-                fout_out << fixed << setprecision(6) << setw(20) << LidarMeasures.last_update_time << " " << euler_cur.transpose()*57.3 << " " << state.pos_end.transpose() << " " << state.vel_end.transpose() \
+                fout_out << fixed << setprecision(6) << setw(20) << LidarMeasures.last_update_time << " " << euler_cur.transpose()*R2D << " " << state.pos_end.transpose() << " " << state.vel_end.transpose() \
                 <<" "<<state.bias_g.transpose()<<" "<<state.bias_a.transpose()<<" "<<state.gravity.transpose()<<" "<<feats_undistort->points.size()<<endl;
             }
             continue;
@@ -1409,7 +1408,7 @@ int main(int argc, char** argv)
         if (lidar_en)
         {
             euler_cur = RotMtoEuler(state.rot_end);
-            fout_pre << setw(20) << LidarMeasures.last_update_time  - first_lidar_time << " " << euler_cur.transpose()*57.3 << " " << state.pos_end.transpose() << " " << state.vel_end.transpose() \
+            fout_pre << setw(20) << LidarMeasures.last_update_time  - first_lidar_time << " " << euler_cur.transpose()*R2D << " " << state.pos_end.transpose() << " " << state.vel_end.transpose() \
             <<" "<<state.bias_g.transpose()<<" "<<state.bias_a.transpose()<<" "<<state.gravity.transpose()<< endl;
         }
 
@@ -1598,12 +1597,12 @@ int main(int argc, char** argv)
                     rot_add = solution.block<3,1>(0,0);
                     t_add   = solution.block<3,1>(3,0);
 
-                    if ((rot_add.norm() * 57.3 < 0.01) && (t_add.norm() * 100 < 0.015))
+                    if ((rot_add.norm() * R2D < 0.01) && (t_add.norm() * 100 < 0.015))
                     {
                         flg_EKF_converged = true;
                     }
 
-                    deltaR = rot_add.norm() * 57.3;
+                    deltaR = rot_add.norm() * R2D;
                     deltaT = t_add.norm() * 100;
                 }
                 euler_cur = RotMtoEuler(state.rot_end);
@@ -1723,10 +1722,10 @@ int main(int argc, char** argv)
         {
             euler_cur = RotMtoEuler(state.rot_end);
             #ifdef USE_IKFOM
-            fout_out << setw(20) << LidarMeasures.last_update_time - first_lidar_time << " " << euler_cur.transpose()*57.3 << " " << state_point.pos.transpose() << " " << state_point.vel.transpose() \
+            fout_out << setw(20) << LidarMeasures.last_update_time - first_lidar_time << " " << euler_cur.transpose()*R2D << " " << state_point.pos.transpose() << " " << state_point.vel.transpose() \
             <<" "<<state_point.bg.transpose()<<" "<<state_point.ba.transpose()<<" "<<state_point.grav<<" "<<feats_undistort->points.size()<<endl;
             #else
-            fout_out << fixed << setprecision(6) << setw(20) << LidarMeasures.last_update_time << " " << euler_cur.transpose()*57.3 << " " << state.pos_end.transpose() << " " << state.vel_end.transpose() \
+            fout_out << fixed << setprecision(6) << setw(20) << LidarMeasures.last_update_time << " " << euler_cur.transpose()*R2D << " " << state.pos_end.transpose() << " " << state.vel_end.transpose() \
             <<" "<<state.bias_g.transpose()<<" "<<state.bias_a.transpose()<<" "<<state.gravity.transpose()<<" "<<feats_undistort->points.size()<<endl;
             #endif
         }

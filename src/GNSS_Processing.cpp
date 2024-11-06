@@ -9,7 +9,7 @@ GNSSProcessing::GNSSProcessing(ros::NodeHandle& nh)
     is_has_yaw_ = false;
     new_gnss_ = false;
     // eular_ = Vector3d(0, 0, 0);
-    eular_ = vector<double>(3, 0);
+    yaw_ = 0.0;
     anchor_ = Vector3d(0, 0, 0);
 
     string gnss_topic; vector<double> antlever;
@@ -31,15 +31,20 @@ void GNSSProcessing::input_gnss(const sensor_msgs::NavSatFix::ConstPtr& msg_in)
 {
     if(!is_origin_set){
         anchor_ = Vector3d(msg_in->latitude, msg_in->longitude, msg_in->altitude);
+        anchor_ = D2R * anchor_;
         // G_m_s2  = earth::gravity(anchor_);
         is_origin_set = true;
     }
 
     GNSS gnss;
     gnss.time = msg_in->header.stamp.toSec();
-    gnss.blh  = Earth::global2local(anchor_, Vector3d(msg_in->latitude, msg_in->longitude, msg_in->altitude));
+    gnss.blh  = Earth::global2local(anchor_, D2R * Vector3d(msg_in->latitude, msg_in->longitude, msg_in->altitude));
     gnss.std  = Vector3d(msg_in->position_covariance[0], msg_in->position_covariance[4], msg_in->position_covariance[8]);
     
+    // ofstream fout(DEBUG_FILE_DIR("value.txt"),ios::app);
+    // fout << fixed << setprecision(3) << "time: " << gnss.time << " gnss pos: " << gnss.blh.transpose() << endl;
+    // fout.close();
+
     gnss_mutex_.lock();
     gnss_queue_.push(gnss);
     gnss_mutex_.unlock();
@@ -54,34 +59,39 @@ void GNSSProcessing::input_path(const nav_msgs::Odometry::ConstPtr& msg_in){
     gnss_mutex_.lock();
     odo_path_[time] = pos;
 
+    // ofstream fout(DEBUG_FILE_DIR("value.txt"),ios::app);
+    // fout << fixed << setprecision(3) << "time: " << time << " odo pos: " << pos.transpose() << endl;
+    // fout.close();
+
     while(!gnss_queue_.empty()){
         GNSS gnss_msg = gnss_queue_.front();
         double gnss_t = gnss_msg.time;
         if(gnss_t >= time-0.01 && gnss_t <= time+0.01){
             // ！待添加GNSS筛选条件
             // 与上一次gnss观测距离足够远，才认为是新的约束
-            if(!gnss_buffer_.empty()){
-                GNSS last_gnss = gnss_buffer_.end()->second;
-                Vector3d diff = gnss_msg.blh - last_gnss.blh;
+            // if(!gnss_buffer_.empty()){
+            //     auto last_gnss_it = gnss_buffer_.find(last_gnss_time_);
+            //     GNSS last_gnss = last_gnss_it->second;
+            //     Vector3d diff = gnss_msg.blh - last_gnss.blh;
 
-                if(diff.norm() < MINMUM_ALIGN_VELOCITY){
-                    if(gnss_msg.std.norm() < last_gnss.std.norm()){
-                        double rm_t = gnss_buffer_.end()->first;
-                        gnss_buffer_.erase(rm_t);
-                        gnss_buffer_[time] = gnss_msg;
-                    }
-                    gnss_queue_.pop();
-                    break;
-                }
-            }
+            //     if(diff.norm() < MINMUM_ALIGN_VELOCITY){
+            //         if(gnss_msg.std.norm() < last_gnss.std.norm()){
+            //             gnss_buffer_.erase(last_gnss_time_);
+            //             gnss_buffer_[time] = gnss_msg;
+            //             last_gnss_time_ =  time;
+            //         }
+            //         gnss_queue_.pop();
+            //         break;
+            //     }
+            // }
 
             gnss_buffer_[time] = gnss_msg;
             gnss_queue_.pop();
+            last_gnss_time_ =   time;
 
-            std::ofstream outfile;
-            outfile.open(DEBUG_FILE_DIR("gnss_size.txt"), std::ios::app);
-            outfile << std::fixed << std::setprecision(6)<< gnss_buffer_.size() << endl;
-            outfile.close();
+            // ofstream fout(DEBUG_FILE_DIR("value.txt"),ios::app);
+            // fout << fixed << setprecision(3) << "time: " << time << " gnss pos: " << gnss_msg.blh.transpose() << " odo pos: " << pos.transpose() << endl;
+            // fout.close();
 
             if(gnss_buffer_.size() > 1) new_gnss_ = true;
             break;
@@ -95,11 +105,32 @@ void GNSSProcessing::input_path(const nav_msgs::Odometry::ConstPtr& msg_in){
     odo_mutex_.unlock();
 }
 
-void GNSSProcessing::Initialization(Vector3d &mean_acc)
+void GNSSProcessing::Initialization()
 {
-    Vector3d acc = mean_acc / mean_acc.norm();      // 归一化
-    eular_[0] = -asin(acc.y());   // 绕x轴旋转 外旋x-y-z
-    eular_[1] = asin(acc.x());    // 绕y轴旋转
+    auto gnss_begin = gnss_buffer_.begin();
+    auto gnss_end   = gnss_buffer_.end(); gnss_end--;
+    Vector3d gnss_vel = gnss_end->second.blh - gnss_begin->second.blh;
+
+    double begin_time = gnss_begin->first;
+    double end_time   = gnss_end->first;
+    auto odo_begin = odo_path_.find(begin_time);
+    auto odo_end = odo_path_.find(end_time);
+    Vector3d odo_vel = odo_end->second - odo_begin->second;
+
+    // 计算yaw角大小及方向 gnss到odo
+    Vector3d dir = gnss_vel.cross(odo_vel);
+    double cos_yaw = gnss_vel.dot(odo_vel) / (gnss_vel.norm() * odo_vel.norm());
+    yaw_ = acos(cos_yaw);
+    yaw_ *= dir.y()>0? 1.0 :-1.0;
+
+    is_has_yaw_ = true;
+
+    ofstream fout(DEBUG_FILE_DIR("init.txt"),ios::app);
+    fout << fixed << setprecision(3) << "endtime: " << end_time << " gnss begin pos: " << gnss_begin->second.blh.transpose() << endl << "odo begin pos: " << odo_begin->second.transpose() << endl;
+    
+    fout << fixed << setprecision(3) << "gnss vel: " << gnss_vel.transpose() << endl << "odo vel: " << odo_vel.transpose() << endl;
+    fout << fixed << setprecision(3) << begin_time << " yaw: " << yaw_ << endl;
+    fout.close();
 }
 
 void GNSSProcessing::gnssOutlierCullingByChi2(ceres::Problem & problem,
@@ -132,6 +163,11 @@ bool GNSSProcessing::optimize(){
         if(new_gnss_){
             new_gnss_ = false;
 
+            if(!is_has_yaw_){
+                Initialization();
+                continue;
+            }
+
             ceres::Problem problem;
             ceres::Solver::Options options;
             options.linear_solver_type = ceres::SPARSE_NORMAL_CHOLESKY;
@@ -139,9 +175,6 @@ bool GNSSProcessing::optimize(){
 
             ceres::Solver::Summary summary;
             ceres::LossFunction *loss_function = new ceres::HuberLoss(1.0);
-
-            double yaw = eular_[2];
-            problem.AddParameterBlock(&yaw, 1);    // 添加yaw角误差
 
             odo_mutex_.lock();
             gnss_mutex_.lock();
@@ -154,11 +187,6 @@ bool GNSSProcessing::optimize(){
                 t_array[i][1] = iter->second.y();
                 t_array[i][2] = iter->second.z();
                 problem.AddParameterBlock(t_array[i], 3);
-                if(!is_has_yaw_) problem.SetParameterBlockConstant(t_array[i]);
-            }
-
-            if(is_has_yaw_){
-                problem.SetParameterBlockConstant(&yaw);
             }
 
             map<double, Vector3d>::iterator iter_odo, iter_odo_next;
@@ -179,8 +207,8 @@ bool GNSSProcessing::optimize(){
                 double t = iter_odo->first;
                 iter_gnss = gnss_buffer_.find(t);
                 if (iter_gnss != gnss_buffer_.end()){
-                    ceres::CostFunction* gnss_function = new GnssFactor(iter_gnss->second, antlever_, eular_[0], eular_[1]);
-                    auto id = problem.AddResidualBlock(gnss_function, loss_function, t_array[i], &yaw);
+                    ceres::CostFunction* gnss_function = new GnssFactor(iter_gnss->second, antlever_, yaw_);
+                    auto id = problem.AddResidualBlock(gnss_function, loss_function, t_array[i]);
                     residual_block.push_back(std::make_pair(id, iter_gnss->second));
                     array_index.push_back(i);
                 }
@@ -189,12 +217,6 @@ bool GNSSProcessing::optimize(){
 
             ceres::Solve(options, &problem, &summary);
             
-            if(!is_has_yaw_){
-                cout << eular_[0] << " " << eular_[1] << endl;
-                eular_[2] = yaw;
-                is_has_yaw_ = true;
-                cout << "yaw: " << yaw << endl;
-            } else
             { // gnss卡方检测并给gnss观测赋予新的权重
                 gnssOutlierCullingByChi2(problem, residual_block);
 
@@ -202,9 +224,9 @@ bool GNSSProcessing::optimize(){
                 for(auto res : residual_block){
                     problem.RemoveResidualBlock(res.first);
 
-                    ceres::CostFunction* gnss_function = new GnssFactor(res.second, antlever_, eular_[0], eular_[1]);
+                    ceres::CostFunction* gnss_function = new GnssFactor(res.second, antlever_, yaw_);
                     int index = array_index[i];
-                    problem.AddResidualBlock(gnss_function, nullptr, t_array[index], &yaw);
+                    problem.AddResidualBlock(gnss_function, nullptr, t_array[index]);
                     i++;
                 }
 

@@ -100,13 +100,13 @@ vect3 SO3ToEuler(const SO3 &orient)
 	if (test > 0.49999*unit) { // singularity at north pole
 	
 		_ang << 2 * std::atan2(q_data[0], q_data[3]), M_PI/2, 0;
-		double temp[3] = {_ang[0] * 57.3, _ang[1] * 57.3, _ang[2] * 57.3};
+		double temp[3] = {_ang[0] * R2D, _ang[1] * R2D, _ang[2] * R2D};
 		vect3 euler_ang(temp, 3);
 		return euler_ang;
 	}
 	if (test < -0.49999*unit) { // singularity at south pole
 		_ang << -2 * std::atan2(q_data[0], q_data[3]), -M_PI/2, 0;
-		double temp[3] = {_ang[0] * 57.3, _ang[1] * 57.3, _ang[2] * 57.3};
+		double temp[3] = {_ang[0] * R2D, _ang[1] * R2D, _ang[2] * R2D};
 		vect3 euler_ang(temp, 3);
 		return euler_ang;
 	}
@@ -115,7 +115,7 @@ vect3 SO3ToEuler(const SO3 &orient)
 			std::atan2(2*q_data[0]*q_data[3]+2*q_data[1]*q_data[2] , -sqx - sqy + sqz + sqw),
 			std::asin (2*test/unit),
 			std::atan2(2*q_data[2]*q_data[3]+2*q_data[1]*q_data[0] , sqx - sqy - sqz + sqw);
-	double temp[3] = {_ang[0] * 57.3, _ang[1] * 57.3, _ang[2] * 57.3};
+	double temp[3] = {_ang[0] * R2D, _ang[1] * R2D, _ang[2] * R2D};
 	vect3 euler_ang(temp, 3);
 		// euler_ang[0] = roll, euler_ang[1] = pitch, euler_ang[2] = yaw
 	return euler_ang;

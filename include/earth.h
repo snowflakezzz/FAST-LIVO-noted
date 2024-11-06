@@ -71,7 +71,7 @@ public:
 
         return dcm;
     }
-
+    // origin: 锚点, global: 待转换点blh坐标 输入必须为弧度
     static Vector3d global2local(const Vector3d &origin, const Vector3d &global){
         Vector3d ecef0  =   blh2ecef(origin);
         Matrix3d cn0e   =   cne(origin);
