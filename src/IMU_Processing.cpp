@@ -140,7 +140,7 @@ void ImuProcess::IMU_init(const MeasureGroup &meas, StatesGroup &state_inout, in
   }
 
   if(init_iter_num < 50) {
-    printf("processing %.1f \n", init_iter_num/50);
+    printf("processing %.2f %\n", (double)init_iter_num/50.0 * 100);
     // std::cout << "processing %.1f" << init_iter_num/200 << endl;
     return;
   }

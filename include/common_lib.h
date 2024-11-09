@@ -33,7 +33,7 @@ using namespace Sophus;
 #define CUBE_LEN  (6.0)
 #define LIDAR_SP_LEN    (2)
 #define INIT_COV   (0.001)
-#define NUM_MATCH_POINTS    (5)
+#define NUM_MATCH_POINTS    (5)     // 最近邻搜索点的个数
 #define MAX_MEAS_DIM        (10000)
 
 #define VEC_FROM_ARRAY(v)        v[0],v[1],v[2]

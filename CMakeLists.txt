@@ -119,6 +119,7 @@ add_executable(fastlivo_mapping src/laserMapping.cpp
                                 src/IMU_Processing.cpp
                                 src/preprocess.cpp
                                 src/GNSS_Processing.cpp
+                                src/laser_mapping.cpp
                                 )
 target_link_libraries(fastlivo_mapping ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${PYTHON_LIBRARIES} ${CERES_LIBRARIES} vio ikdtree)
 target_include_directories(fastlivo_mapping PRIVATE ${PYTHON_INCLUDE_DIRS})

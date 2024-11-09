@@ -15,7 +15,7 @@ ncc_thre: 0
 img_point_cov : 100 # 1000
 laser_point_cov : 0.001 # 0.001
 delta_time: 0.0         # camera与lidar时偏 =lidar时间 - camera时间
-gnss_en: true           # 是否使用gnss观测
+gnss_en: false           # 是否使用gnss观测
 
 common:
     lid_topic:  "/velodyne_points"
