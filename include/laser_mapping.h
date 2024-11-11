@@ -35,8 +35,11 @@
 #include <sensor_msgs/CompressedImage.h>
 #include <sensor_msgs/NavSatFix.h>
 #include <cv_bridge/cv_bridge.h>
-#include <ikd-Tree/ikd_Tree.h>
 #include "GNSS_Processing.h"
+#include "ivox3d/ivox3d.h"
+#ifdef USE_ikdtree
+#include "ikd-Tree/ikd_Tree.h"
+#endif
 
 #define INIT_TIME           (0.5)
 #define MAXN                (360000)
@@ -45,6 +48,7 @@
 class LaserMapping {
 public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
+    using IVoxType = faster_lio::IVox<3, faster_lio::IVoxNodeType::DEFAULT, PointType>;
 
     LaserMapping();
     ~LaserMapping(){};
@@ -82,15 +86,23 @@ private:
     void publish_effect_world();
     void publish_path();
 
+    /// modules
+    IVoxType::Options ivox_options_;
+    std::shared_ptr<IVoxType> ivox_ = nullptr;                    // localmap in ivox
+    shared_ptr<Preprocess> p_pre;
+    shared_ptr<ImuProcess> p_imu;
+    GNSSProcessing::Ptr p_gnss;
+    lidar_selection::LidarSelectorPtr lidar_selector;
+
     PointCloudXYZI::Ptr pcl_wait_pub;
     mutex mtx_buffer;
     condition_variable sig_buffer;
+    bool flg_first_scan;
 
-    string root_dir = ROOT_DIR;
     string map_file_path, lid_topic, imu_topic, img_topic, config_file;
     Vector3d Lidar_offset_to_IMU;
     M3D Lidar_rot_to_IMU;
-    int feats_down_size = 0, NUM_MAX_ITERATIONS = 0, laserCloudValidNum = 0,\
+    int feats_down_size = 0, NUM_MAX_ITERATIONS = 0,\
         effct_feat_num = 0, time_log_counter = 0, publish_count = 0;
 
     //double last_timestamp_lidar,  当前接收到的最新imu数据的时间戳;
@@ -118,8 +130,6 @@ private:
     bool fast_lio_is_ready = false;
     double delta_time = 0.0;
 
-    vector<BoxPointType> cub_needrm;
-    vector<BoxPointType> cub_needad;
     deque<PointCloudXYZI::Ptr>  lidar_buffer;
     deque<double>          time_buffer;
     deque<sensor_msgs::Imu::ConstPtr> imu_buffer;
@@ -141,7 +151,9 @@ private:
     pcl::VoxelGrid<PointType> downSizeFilterSurf;
     pcl::VoxelGrid<PointType> downSizeFilterMap;
 
+    #ifdef USE_ikdtree
     KD_TREE ikdtree;        // ikdtree中存在多线程，所以必须定义为全局变量 https://github.com/hku-mars/ikd-Tree/issues/8
+    #endif
 
     V3D euler_cur;
     V3D position_last;
@@ -155,11 +167,6 @@ private:
     nav_msgs::Odometry odomAftMapped;
     geometry_msgs::Quaternion geoQuat;
     geometry_msgs::PoseStamped msg_body_pose;
-
-    shared_ptr<Preprocess> p_pre;
-    shared_ptr<ImuProcess> p_imu;
-    GNSSProcessing::Ptr p_gnss;
-    lidar_selection::LidarSelectorPtr lidar_selector;
 
     PointCloudXYZRGB::Ptr pcl_wait_save;  //add save rbg map
     PointCloudXYZI::Ptr pcl_wait_save_lidar;  //add save xyzi map
@@ -181,7 +188,7 @@ private:
     image_transport::Publisher img_pub;
 
     // 滤波优化相关参数
-    StatesGroup  state;                         // 系统状态量
+    StatesGroup state;                         // 系统状态量
     StatesGroup state_propagat;                 // 上一次优化后的状态量
 
     bool nearest_search_en;                     // 判断是否要进行最近临点搜索

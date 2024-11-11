@@ -1,9 +1,12 @@
 # TO DO
 
 * [ ] add gnss
-* [ ] change lasermapping to class
+* [X] change lasermapping to class
 * [ ] add vgicp
 * [ ] add compute of normal
+
+在类中使用ikdtree效果较差
+
 
 # FAST-LIVO
 

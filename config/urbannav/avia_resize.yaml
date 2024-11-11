@@ -7,7 +7,7 @@ filter_size_map : 0.3
 cube_side_length : 20
 grid_size : 20  # 40
 patch_size : 4   # 8
-img_enable : 1
+img_enable : 1 #1
 lidar_enable : 1
 outlier_threshold : 300 # 78 100 156
 ncc_en: false

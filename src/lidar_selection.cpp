@@ -174,7 +174,6 @@ void LidarSelector::addSparseMap(cv::Mat img, PointCloudXYZI::Ptr pg)
 
     // double t_b2 = omp_get_wtime() - t0;
     // t0 = omp_get_wtime();
-    
     int add=0;
     for (int i=0; i<length; i++) 
     {
@@ -1029,7 +1028,7 @@ V3F LidarSelector::getpixel(cv::Mat img, V2D pc)
     return pixel;
 }
 
-void LidarSelector::detect(cv::Mat img, PointCloudXYZI::Ptr pg) 
+void LidarSelector::detect(cv::Mat img, PointCloudXYZI::Ptr pg)
 {
     // step1 图像预处理，转化为灰度图
     if(width!=img.cols || height!=img.rows)

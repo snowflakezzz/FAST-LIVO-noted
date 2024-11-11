@@ -157,24 +157,16 @@ void ImuProcess::IMU_init(const MeasureGroup &meas, StatesGroup &state_inout, in
     double cosg = gdir.dot(diracc);
     double ang = acos(cosg);
     M3D R_g_imu = AngleAxisd(ang, axis).matrix();
-    // Vector3d acc_norm = mean_acc.normalized();
-    // double roll = -asin(acc_norm.y());  // 绕x轴旋转   // 因为imu坐标系z轴是反的，所以该方法会
-    // double pitch = asin(acc_norm.x());  // 绕y轴旋转
-    // M3D R_g_imu = Matrix3d(Eigen::AngleAxisd(pitch, Vector3d::UnitY()) *
-    //                         Eigen::AngleAxisd(roll, Vector3d::UnitX()));
-
-    ofstream fout(DEBUG_FILE_DIR("init.txt"),ios::app);
-    fout << "R_g_imu: " << endl << R_g_imu << endl;
-    fout.close();
 
     state_inout.rot_end = R_g_imu;
     state_inout.bias_g  = mean_gyr;
 
+    // state_inout.gravity = -mean_acc / mean_acc.norm() * G_m_s2;
+    // state_inout.bias_g  = mean_gyr;
+
     cov_acc = cov_acc * pow(G_m_s2 / mean_acc.norm(), 2);
     cov_acc = cov_acc.cwiseProduct(cov_acc_scale);
     cov_gyr = cov_gyr.cwiseProduct(cov_gyr_scale);
-
-    fout_imu.open(DEBUG_FILE_DIR("imu.txt"),ios::out);
 
     imu_need_init_ = false;
   }

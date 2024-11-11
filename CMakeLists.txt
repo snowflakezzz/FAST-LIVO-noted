@@ -3,8 +3,8 @@ project(fast_livo)
 
 SET(CMAKE_BUILD_TYPE "Debug")
 
-ADD_COMPILE_OPTIONS(-std=c++14 )
-ADD_COMPILE_OPTIONS(-std=c++14 )
+ADD_COMPILE_OPTIONS(-std=c++17 )
+ADD_COMPILE_OPTIONS(-std=c++17 )
 set( CMAKE_CXX_FLAGS "-std=c++14 -O3" ) 
 
 add_definitions(-DROOT_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/\")
@@ -12,13 +12,13 @@ add_definitions(-DROOT_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/\")
 add_definitions(-w)
 
 # add_definitions(-DUSE_IKFOM)
-add_definitions(-DUSE_ikdtree)
+# add_definitions(-DUSE_ikdtree)
 # add_definitions(-DDEBUG_PRINT)
 # add_definitions(-DUSE_ikdforest)
 # add_definitions(-DUSE_FOV_Checker)
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fexceptions" )
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14 -pthread -std=c++0x -std=c++14 -fexceptions")
@@ -108,7 +108,7 @@ catkin_package(
 
 add_library(ikdtree include/ikd-Tree/ikd_Tree.cpp
                     # include/ikd-Forest/ikd_Forest.cpp 
-                    include/FOV_Checker/FOV_Checker.cpp
+                    # include/FOV_Checker/FOV_Checker.cpp
                     )
 add_library(vio src/lidar_selection.cpp
                 src/frame.cpp

@@ -22,6 +22,8 @@ LaserMapping::LaserMapping()
     pcl_wait_save = boost::make_shared<PointCloudXYZRGB>();
     pcl_wait_save_lidar = boost::make_shared<PointCloudXYZI>();
     laserCloudOri = boost::make_shared<PointCloudXYZI>();
+
+    flg_first_scan = true;
 }
 
 void LaserMapping::Run(){
@@ -79,7 +81,7 @@ void LaserMapping::Run(){
             // step4.1 视觉追踪、残差构建、state位姿优化更新
             lidar_selector->detect(LidarMeasures.measures.back().img, pcl_wait_pub);
             int size_sub = lidar_selector->sub_map_cur_frame_.size();
-            
+
             // step4.2 点云可视化
             sub_map_cur_frame_point->clear();
             for(int i=0; i<size_sub; i++)
@@ -111,6 +113,8 @@ void LaserMapping::Run(){
     // step4 点云降采样，并初始化ikdtree的局部地图
     downSizeFilterSurf.setInputCloud(feats_undistort);
     downSizeFilterSurf.filter(*feats_down_body);
+
+    #ifdef USE_ikdtree
     if(ikdtree.Root_Node == nullptr)
     {
         if(feats_down_body->points.size() > 5)
@@ -121,8 +125,16 @@ void LaserMapping::Run(){
         return;
     }
     int featsFromMapNum = ikdtree.size();
+    #else
+    if (flg_first_scan){
+        ivox_->AddPoints(feats_down_body->points);
+        flg_first_scan = false;
+        return;
+    }
+    #endif
+
     feats_down_size = feats_down_body->points.size();
-    cout<<"[ LIO ]: Raw feature num: "<<feats_undistort->points.size()<<" downsamp num "<<feats_down_size<<" Map num: "<<featsFromMapNum<< "." << endl;
+    cout<<"[ LIO ]: Raw feature num: "<<feats_undistort->points.size()<<" downsamp num "<<feats_down_size<< endl;//<<" Map num: "<<featsFromMapNum<< "." << endl;
 
     feats_down_world->resize(feats_down_size);
 
@@ -233,8 +245,7 @@ void LaserMapping::Run(){
 
     for (int i = 0; i < size; i++)
     {
-        RGBpointBodyToWorld(&laserCloudFullRes->points[i], \
-                            &laserCloudWorld->points[i]);
+        RGBpointBodyToWorld(&laserCloudFullRes->points[i], &laserCloudWorld->points[i]);
     }
     *pcl_wait_pub = *laserCloudWorld;
 
@@ -279,7 +290,7 @@ void LaserMapping::Finish(){
     #ifndef DEPLOY
     vector<double> t, s_vec, s_vec2, s_vec3, s_vec4, s_vec5, s_vec6, s_vec7;    
     FILE *fp2;
-    string log_dir = root_dir + "/Log/class_fast_livo_time_log.csv";
+    string log_dir = DEBUG_FILE_DIR("class_fast_livo_time_log.csv");
     fp2 = fopen(log_dir.c_str(),"w");
     fprintf(fp2,"time_stamp, average time, incremental time, search time,fov check time, total time, alpha_bal, alpha_del\n");
     for (int i = 0;i<time_log_counter; i++){
@@ -299,18 +310,63 @@ void LaserMapping::Finish(){
 
 void LaserMapping::map_incremental()
 {
-    // PointCloudXYZI::Ptr PointToAdd;
-    // PointCloudXYZI::Ptr PointNoNeedDownsample;
-    // PointToAdd.reserve(feats_down_size);
-    // PointNoNeedDownsample.reserve(feats_down_size);
+    PointVector points_to_add;
+    PointVector point_no_need_downsample;
 
-    for (int i = 0; i < feats_down_size; i++)
-    {
+    int cur_pts = feats_down_body->size();
+    points_to_add.reserve(cur_pts);
+    point_no_need_downsample.reserve(cur_pts);
+
+    std::vector<size_t> index(cur_pts);
+    for (size_t i = 0; i < cur_pts; ++i) {
+        index[i] = i;
+    }
+
+    std::for_each(std::execution::unseq, index.begin(), index.end(), [&](const size_t &i) {
         /* transform to world frame */
         pointBodyToWorld(&(feats_down_body->points[i]), &(feats_down_world->points[i]));
 
-    }
+        /* decide if need add to map */
+        PointType &point_world = feats_down_world->points[i];
+        if (!Nearest_Points[i].empty() && flg_EKF_inited) {
+            const PointVector &points_near = Nearest_Points[i];
+
+            Eigen::Vector3f center =
+                ((point_world.getVector3fMap() / filter_size_map_min).array().floor() + 0.5) * filter_size_map_min;
+
+            Eigen::Vector3f dis_2_center = points_near[0].getVector3fMap() - center;
+
+            if (fabs(dis_2_center.x()) > 0.5 * filter_size_map_min &&
+                fabs(dis_2_center.y()) > 0.5 * filter_size_map_min &&
+                fabs(dis_2_center.z()) > 0.5 * filter_size_map_min) {
+                point_no_need_downsample.emplace_back(point_world);
+                return;
+            }
+
+            bool need_add = true;
+            float dist = common::calc_dist(point_world.getVector3fMap(), center);
+            if (points_near.size() >= NUM_MATCH_POINTS) {
+                for (int readd_i = 0; readd_i < NUM_MATCH_POINTS; readd_i++) {
+                    if (common::calc_dist(points_near[readd_i].getVector3fMap(), center) < dist + 1e-6) {
+                        need_add = false;
+                        break;
+                    }
+                }
+            }
+            if (need_add) {
+                points_to_add.emplace_back(point_world);
+            }
+        } else {
+            points_to_add.emplace_back(point_world);
+        }
+    });
+
+    #ifdef USE_ikdtree
     ikdtree.Add_Points(feats_down_world->points, true);
+    #else
+    ivox_->AddPoints(points_to_add);
+    ivox_->AddPoints(point_no_need_downsample);
+    #endif
 }
 
 // 返回观测矩阵构建成功
@@ -345,7 +401,11 @@ void LaserMapping::h_share_model(MatrixXd &Hsub, VectorXd &meas_vec)
         uint8_t search_flag = 0;  
         double search_start = omp_get_wtime();
         if (nearest_search_en){
+            #ifdef USE_ikdtree
             ikdtree.Nearest_Search(point_world, NUM_MATCH_POINTS, points_near, pointSearchSqDis);
+            #else
+            ivox_->GetClosestPoint(point_world, points_near, NUM_MATCH_POINTS);
+            #endif
             point_selected_surf[i] = pointSearchSqDis[NUM_MATCH_POINTS - 1] > 5 ? false : true;
             kdtree_search_counter ++;                        
         }
@@ -542,6 +602,8 @@ bool LaserMapping::InitROS(ros::NodeHandle &nh){
     readParameters(nh);
     pcl_wait_pub->clear();
 
+    ivox_ = std::make_shared<IVoxType>(ivox_options_);
+
     sub_pcl = p_pre->lidar_type == AVIA ? \
         nh.subscribe(lid_topic, 200000, &LaserMapping::livox_pcl_cbk, this) : \
         nh.subscribe(lid_topic, 200000, &LaserMapping::standard_pcl_cbk, this);
@@ -701,6 +763,7 @@ void LaserMapping::readParameters(ros::NodeHandle &nh)
     bool ncc_en;
     double gyr_cov_scale, acc_cov_scale;
     double filter_size_surf_min, filter_size_map_min;
+    int ivox_nearby_type;
     
     // step1 参数读取
     nh.param<int>("dense_map_enable",dense_map_en,1);
@@ -737,10 +800,23 @@ void LaserMapping::readParameters(ros::NodeHandle &nh)
     nh.param<vector<double>>("mapping/extrinsic_R", extrinR, vector<double>());
     Lidar_rot_to_IMU << MAT_FROM_ARRAY(extrinR);
 
-    // if(nh.hasParam("camera/Pcl") && nh.hasParam("camera/Rcl")){
-    nh.param<vector<double>>("camera/Pcl", cameraextrinT, vector<double>());
-    nh.param<vector<double>>("camera/Rcl", cameraextrinR, vector<double>());
-    // }
+    if(nh.hasParam("camera/Pcl") && nh.hasParam("camera/Rcl")){
+        nh.param<vector<double>>("camera/Pcl", cameraextrinT, vector<double>());
+        nh.param<vector<double>>("camera/Rcl", cameraextrinR, vector<double>());
+    }
+    else if(nh.hasParam("camera/extrinsic_T") && nh.hasParam("camera/extrinsic_R")){
+        nh.param<vector<double>>("camera/extrinsic_T", cameraextrinT, vector<double>());
+        nh.param<vector<double>>("camera/extrinsic_R", cameraextrinR, vector<double>());
+        M3D Ric, Ril, Rcl; V3D Tic, Til, Tcl;
+        Ric << MAT_FROM_ARRAY(cameraextrinR);
+        Tic << VEC_FROM_ARRAY(cameraextrinT);
+        Ril << MAT_FROM_ARRAY(extrinR);
+        Til << VEC_FROM_ARRAY(extrinT);
+        Rcl = Ril * Ric.transpose();
+        Tcl = Ric * (Tic - Til);
+        std::copy(Rcl.data(), Rcl.data()+Rcl.size(), cameraextrinR.begin());
+        std::copy(Tcl.data(), Tcl.data()+Tcl.size(), cameraextrinT.begin());
+    }
 
     nh.param<int>("grid_size", grid_size, 40);
     nh.param<int>("patch_size", patch_size, 4);
@@ -748,6 +824,22 @@ void LaserMapping::readParameters(ros::NodeHandle &nh)
     nh.param<double>("ncc_thre", ncc_thre, 100);
     nh.param<bool>("pcd_save/pcd_save_en", pcd_save_en, false);
     nh.param<double>("delta_time", delta_time, 0.0);
+
+    nh.param<float>("ivox_grid_resolution", ivox_options_.resolution_, 0.2);
+    nh.param<int>("ivox_nearby_type", ivox_nearby_type, 18);
+
+    if (ivox_nearby_type == 0) {
+        ivox_options_.nearby_type_ = IVoxType::NearbyType::CENTER;
+    } else if (ivox_nearby_type == 6) {
+        ivox_options_.nearby_type_ = IVoxType::NearbyType::NEARBY6;
+    } else if (ivox_nearby_type == 18) {
+        ivox_options_.nearby_type_ = IVoxType::NearbyType::NEARBY18;
+    } else if (ivox_nearby_type == 26) {
+        ivox_options_.nearby_type_ = IVoxType::NearbyType::NEARBY26;
+    } else {
+        LOG(WARNING) << "unknown ivox_nearby_type, use NEARBY18";
+        ivox_options_.nearby_type_ = IVoxType::NearbyType::NEARBY18;
+    }
 
     // step2 初始化视觉相关参数
     lidar_selector = boost::make_shared<lidar_selection::LidarSelector>(grid_size, new SparseMap);
@@ -771,6 +863,7 @@ void LaserMapping::readParameters(ros::NodeHandle &nh)
     lidar_selector->cy = cam_cy;
     lidar_selector->ncc_en = ncc_en;
     lidar_selector->init();
+
 
     // step3 imu相关参数设定
     p_imu->set_extrinsic(Lidar_offset_to_IMU, Lidar_rot_to_IMU);

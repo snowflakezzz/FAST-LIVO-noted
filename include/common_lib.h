@@ -70,6 +70,21 @@ extern M3F Eye3f;
 extern V3D Zero3d;
 extern V3F Zero3f;
 
+namespace common{
+/**
+ * squared distance
+ * @param p1
+ * @param p2
+ * @return
+ */
+inline float calc_dist(const PointType &p1, const PointType &p2) {
+    return (p1.x - p2.x) * (p1.x - p2.x) + (p1.y - p2.y) * (p1.y - p2.y) + (p1.z - p2.z) * (p1.z - p2.z);
+}
+
+inline float calc_dist(const Eigen::Vector3f &p1, const Eigen::Vector3f &p2) { return (p1 - p2).squaredNorm(); }
+
+}
+
 namespace lidar_selection
 {
     class Point;
@@ -525,19 +540,6 @@ bool esti_plane(Matrix<T, 4, 1> &pca_result, const PointVector &point, const T &
         }
     }
 
-    // for (int j = 0; j < NUM_MATCH_POINTS; j++)
-    // {
-    //     if (fabs(normvec(0) * point[j].x + normvec(1) * point[j].y + normvec(2) * point[j].z + 1.0f) > threshold)
-    //     {
-    //         return false;
-    //     }
-    // }
-
-    // T n = normvec.norm();
-    // pca_result(0) = normvec(0) / n;
-    // pca_result(1) = normvec(1) / n;
-    // pca_result(2) = normvec(2) / n;
-    // pca_result(3) = 1.0 / n; 
     return true;
 }
 
