@@ -83,7 +83,10 @@ inline float calc_dist(const PointType &p1, const PointType &p2) {
 
 inline float calc_dist(const Eigen::Vector3f &p1, const Eigen::Vector3f &p2) { return (p1 - p2).squaredNorm(); }
 
+inline float calc_dist(const Eigen::Vector3d &p1, const Eigen::Vector3d &p2) { return (p1 - p2).squaredNorm(); }
 }
+
+
 
 namespace lidar_selection
 {

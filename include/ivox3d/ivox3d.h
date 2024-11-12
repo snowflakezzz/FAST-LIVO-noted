@@ -20,7 +20,7 @@ enum class IVoxNodeType {
     PHC,      // phc ivox
 };
 
-/// traits for NodeType
+/// traits for NodeType 根据node_type选择不同的NodeType
 template <IVoxNodeType node_type, typename PointT, int dim>
 struct IVoxNodeTypeTraits {};
 
@@ -99,7 +99,7 @@ class IVox {
 
     Options options_;
     std::unordered_map<KeyType, typename std::list<std::pair<KeyType, NodeType>>::iterator, hash_vec<dim>>
-        grids_map_;                                        // voxel hash map
+        grids_map_;                                        // voxel hash map KeyType为键3*1维矩阵；值为list迭代器；hash_vec<dim>为自定义的哈希函数
     std::list<std::pair<KeyType, NodeType>> grids_cache_;  // voxel cache
     std::vector<KeyType> nearby_grids_;                    // nearbys
 };

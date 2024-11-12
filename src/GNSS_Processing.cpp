@@ -8,9 +8,12 @@ GNSSProcessing::GNSSProcessing(ros::NodeHandle& nh)
     is_origin_set = false;
     is_has_yaw_ = false;
     new_gnss_ = false;
+    ready_comp_ = false;
     // eular_ = Vector3d(0, 0, 0);
     yaw_ = 0.0;
     anchor_ = Vector3d(0, 0, 0);
+
+    last_gnss_time_ = -1;
 
     string gnss_topic; vector<double> antlever;
     nh.param<string>("common/gnss_topic", gnss_topic, "navsat/fix");
@@ -20,7 +23,7 @@ GNSSProcessing::GNSSProcessing(ros::NodeHandle& nh)
     thread_opt_ = std::thread(&GNSSProcessing::optimize, this);
 
     gnss_sub_ = nh.subscribe(gnss_topic, 2000, &GNSSProcessing::input_gnss, this);
-    odo_sub_ = nh.subscribe("/aft_mapped_to_init", 20000, &GNSSProcessing::input_path, this);
+    // odo_sub_ = nh.subscribe("/aft_mapped_to_init", 20000, &GNSSProcessing::input_path, this);
 }
 
 GNSSProcessing::~GNSSProcessing(){
@@ -29,6 +32,8 @@ GNSSProcessing::~GNSSProcessing(){
 
 void GNSSProcessing::input_gnss(const sensor_msgs::NavSatFix::ConstPtr& msg_in)
 {
+    if(msg_in->status.status < 0) return;  // 不使用非固定解
+
     if(!is_origin_set){
         anchor_ = Vector3d(msg_in->latitude, msg_in->longitude, msg_in->altitude);
         anchor_ = D2R * anchor_;
@@ -38,71 +43,72 @@ void GNSSProcessing::input_gnss(const sensor_msgs::NavSatFix::ConstPtr& msg_in)
 
     GNSS gnss;
     gnss.time = msg_in->header.stamp.toSec();
+    // gnss.time -= 18; gpst和utc的差异
     gnss.blh  = Earth::global2local(anchor_, D2R * Vector3d(msg_in->latitude, msg_in->longitude, msg_in->altitude));
     gnss.std  = Vector3d(msg_in->position_covariance[0], msg_in->position_covariance[4], msg_in->position_covariance[8]);
-    
-    // ofstream fout(DEBUG_FILE_DIR("value.txt"),ios::app);
-    // fout << fixed << setprecision(3) << "time: " << gnss.time << " gnss pos: " << gnss.blh.transpose() << endl;
-    // fout.close();
 
     gnss_mutex_.lock();
     gnss_queue_.push(gnss);
     gnss_mutex_.unlock();
 }
 
-void GNSSProcessing::input_path(const nav_msgs::Odometry::ConstPtr& msg_in){
-    Vector3d pos = Vector3d(msg_in->pose.pose.position.x, msg_in->pose.pose.position.y, msg_in->pose.pose.position.z);
-    double time = msg_in->header.stamp.toSec();
+void GNSSProcessing::input_path(const double &cur_time, const Eigen::Vector3d &position){
+    Vector3d pos = position;
+    double time = cur_time;
 
-    // cout << "odo: " << std::fixed << std::setprecision(2) << time << endl;
     odo_mutex_.lock();
     gnss_mutex_.lock();
     odo_path_[time] = pos;
 
-    // ofstream fout(DEBUG_FILE_DIR("value.txt"),ios::app);
-    // fout << fixed << setprecision(3) << "time: " << time << " odo pos: " << pos.transpose() << endl;
-    // fout.close();
-
     while(!gnss_queue_.empty()){
         GNSS gnss_msg = gnss_queue_.front();
         double gnss_t = gnss_msg.time;
-        if(gnss_t >= time-0.01 && gnss_t <= time+0.01){
-            // ！待添加GNSS筛选条件
-            // 与上一次gnss观测距离足够远，才认为是新的约束
-            // if(!gnss_buffer_.empty()){
-            //     auto last_gnss_it = gnss_buffer_.find(last_gnss_time_);
-            //     GNSS last_gnss = last_gnss_it->second;
-            //     Vector3d diff = gnss_msg.blh - last_gnss.blh;
 
-            //     if(diff.norm() < MINMUM_ALIGN_VELOCITY){
-            //         if(gnss_msg.std.norm() < last_gnss.std.norm()){
-            //             gnss_buffer_.erase(last_gnss_time_);
-            //             gnss_buffer_[time] = gnss_msg;
-            //             last_gnss_time_ =  time;
-            //         }
-            //         gnss_queue_.pop();
-            //         break;
-            //     }
-            // }
-
-            gnss_buffer_[time] = gnss_msg;
+        if(last_gnss_time_!=-1 && common::calc_dist(gnss_msg.blh, last_gnss_.blh) < 5){
             gnss_queue_.pop();
-            last_gnss_time_ =   time;
+            continue;
+        }
 
-            // ofstream fout(DEBUG_FILE_DIR("value.txt"),ios::app);
-            // fout << fixed << setprecision(3) << "time: " << time << " gnss pos: " << gnss_msg.blh.transpose() << " odo pos: " << pos.transpose() << endl;
-            // fout.close();
-
-            if(gnss_buffer_.size() > 1) new_gnss_ = true;
+        if(gnss_t < time)
+            gnss_queue_.pop();
+        else if(gnss_t <= time+0.1){
+            new_gnss_ = true;
             break;
         }
-        else if(gnss_t < time - 0.01)
-            gnss_queue_.pop();
-        else if(gnss_t > time + 0.01)
-            break;
+        else break;
     }
     gnss_mutex_.unlock();
     odo_mutex_.unlock();
+}
+
+void GNSSProcessing::addIMUpos(const vector<Pose6D> &IMUpose, const double pcl_beg_time){
+    if(new_gnss_){
+        odo_mutex_.lock();
+        gnss_mutex_.lock();
+        GNSS gnss_msg = gnss_queue_.front();
+        double gnss_t = gnss_msg.time;
+
+        for(auto item : IMUpose){
+            double time = pcl_beg_time + item.offset_time;
+            if(gnss_t >= time-0.01 && gnss_t <= time+0.01){
+                // 去除gnss飞点
+                Eigen::Vector3d odo_pos(VEC_FROM_ARRAY(item.pos));
+                if(common::calc_dist(odo_pos, gnss_msg.blh)>3)
+                    break;
+
+                odo_path_[time] = odo_pos;
+                gnss_buffer_[time] = gnss_msg;
+                last_gnss_ = gnss_msg;
+                last_gnss_time_ = time;
+                if(gnss_buffer_.size()>1) ready_comp_ = true;
+                break;
+            }
+        }
+
+        new_gnss_ = false;
+        gnss_mutex_.unlock();
+        odo_mutex_.unlock();
+    }
 }
 
 void GNSSProcessing::Initialization()
@@ -160,8 +166,8 @@ void GNSSProcessing::gnssOutlierCullingByChi2(ceres::Problem & problem,
 
 bool GNSSProcessing::optimize(){
     while(true){
-        if(new_gnss_){
-            new_gnss_ = false;
+        if(ready_comp_){
+            ready_comp_ = false;
 
             if(!is_has_yaw_){
                 Initialization();
@@ -217,6 +223,7 @@ bool GNSSProcessing::optimize(){
 
             ceres::Solve(options, &problem, &summary);
             
+            if(0)
             { // gnss卡方检测并给gnss观测赋予新的权重
                 gnssOutlierCullingByChi2(problem, residual_block);
 

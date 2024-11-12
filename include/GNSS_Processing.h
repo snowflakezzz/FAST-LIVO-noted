@@ -34,13 +34,15 @@ public:
 
     void input_gnss(const sensor_msgs::NavSatFix::ConstPtr& msg_in);
 
-    void input_path(const nav_msgs::Odometry::ConstPtr& msg_in);
+    void input_path(const double &cur_time, const Eigen::Vector3d &position);
 
+    void addIMUpos(const vector<Pose6D> &IMUpose, const double pcl_beg_time);
+    
+private:
     void Initialization();
 
     bool optimize();
-    
-private:
+
     Vector3d            anchor_;        // 锚点，弧度制
     bool                is_origin_set;  // 是否已经设置了锚点
     bool                is_has_yaw_;    // 是否有yaw角
@@ -48,12 +50,14 @@ private:
     Vector3d            antlever_;      // 杆臂
 
     bool                new_gnss_;
+    bool                ready_comp_;    // 是否准备好解算
     std::thread         thread_opt_;
 
-    ros::Subscriber odo_sub_;
+    // ros::Subscriber odo_sub_;
     ros::Subscriber gnss_sub_;
     std::map<double, Vector3d> odo_path_;
     std::map<double, GNSS> gnss_buffer_;
+    GNSS last_gnss_;
     double last_gnss_time_;
     std::queue<GNSS> gnss_queue_;
 

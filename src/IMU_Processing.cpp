@@ -180,9 +180,6 @@ void ImuProcess::Forward(const MeasureGroup &meas, StatesGroup &state_inout, dou
   const double &imu_beg_time = v_imu.front()->header.stamp.toSec();
   const double &imu_end_time = v_imu.back()->header.stamp.toSec();
 
-  // cout<<"[ IMU Process ]: Process lidar from "<<pcl_beg_time<<" to "<<pcl_end_time<<", " \
-  //          <<meas.imu.size()<<" imu msgs from "<<imu_beg_time<<" to "<<imu_end_time<<endl;
-
   // IMUpose.push_back(set_pose6d(0.0, Zero3d, Zero3d, state.vel_end, state.pos_end, state.rot_end));
   if (IMUpose.empty()) {
     IMUpose.push_back(set_pose6d(0.0, acc_s_last, angvel_last, state_inout.vel_end, state_inout.pos_end, state_inout.rot_end));
@@ -281,9 +278,6 @@ void ImuProcess::Forward(const MeasureGroup &meas, StatesGroup &state_inout, dou
   last_imu_ = v_imu.back();
   last_lidar_end_time_ = end_time;
 
-  // auto pos_liD_e = state_inout.pos_end + state_inout.rot_end * Lid_offset_to_IMU;
-  // auto R_liD_e   = state_inout.rot_end * Lidar_R_to_IMU;
-
   #ifdef DEBUG_PRINT
     cout<<"[ IMU Process ]: vel "<<state_inout.vel_end.transpose()<<" pos "<<state_inout.pos_end.transpose()<<" ba"<<state_inout.bias_a.transpose()<<" bg "<<state_inout.bias_g.transpose()<<endl;
     cout<<"propagated cov: "<<state_inout.cov.diagonal().transpose()<<endl;
@@ -334,8 +328,6 @@ void ImuProcess::Backward(const LidarMeasureGroup &lidar_meas, StatesGroup &stat
 
 void ImuProcess::Process(const LidarMeasureGroup &lidar_meas, StatesGroup &stat, PointCloudXYZI::Ptr cur_pcl_un_)
 {
-  double t1,t2,t3;
-  t1 = omp_get_wtime();
   ROS_ASSERT(lidar_meas.lidar != nullptr);
   MeasureGroup meas = lidar_meas.measures.back();
 
@@ -358,9 +350,6 @@ void ImuProcess::Process(const LidarMeasureGroup &lidar_meas, StatesGroup &stat,
       cov_acc = cov_acc.cwiseProduct(cov_acc_scale);
       cov_gyr = cov_gyr.cwiseProduct(cov_gyr_scale);
 
-      // cov_acc = Eye3d * cov_acc_scale;
-      // cov_gyr = Eye3d * cov_gyr_scale;
-      // cout<<"mean acc: "<<mean_acc<<" acc measures in word frame:"<<state.rot_end.transpose()*mean_acc<<endl;
       ROS_INFO("IMU Initials: Gravity: %.4f %.4f %.4f %.4f; state.bias_g: %.4f %.4f %.4f; acc covarience: %.8f %.8f %.8f; gry covarience: %.8f %.8f %.8f",\
                stat.gravity[0], stat.gravity[1], stat.gravity[2], mean_acc.norm(), cov_bias_gyr[0], cov_bias_gyr[1], cov_bias_gyr[2], cov_acc[0], cov_acc[1], cov_acc[2], cov_gyr[0], cov_gyr[1], cov_gyr[2]);
       fout_imu.open(DEBUG_FILE_DIR("imu.txt"),ios::out);
@@ -378,13 +367,6 @@ void ImuProcess::Process(const LidarMeasureGroup &lidar_meas, StatesGroup &stat,
     const double &pcl_beg_time = lidar_meas.lidar_beg_time;
     const double &pcl_end_time = pcl_beg_time + lidar_meas.lidar->points.back().curvature / double(1000);
     Forward(meas, stat, pcl_beg_time, pcl_end_time);
-    // cout<<"[ IMU Process ]: Process lidar from "<<pcl_beg_time<<" to "<<pcl_end_time<<", " \
-    //        <<meas.imu.size()<<" imu msgs from "<<imu_beg_time<<" to "<<imu_end_time<<endl;
-    // cout<<"Time:";
-    // for (auto it = IMUpose.begin(); it != IMUpose.end(); ++it) {
-    //   cout<<it->offset_time<<" ";
-    // }
-    // cout<<endl<<"size:"<<IMUpose.size()<<endl;
     Backward(lidar_meas, stat, *cur_pcl_un_);
     last_lidar_end_time_ = pcl_end_time;
     IMUpose.clear();
@@ -395,26 +377,12 @@ void ImuProcess::Process(const LidarMeasureGroup &lidar_meas, StatesGroup &stat,
     Forward(meas, stat, pcl_beg_time, img_end_time);
   }
 
-  t2 = omp_get_wtime();
-
-  // {
-  //   static ros::Publisher pub_UndistortPcl =
-  //       nh.advertise<sensor_msgs::PointCloud2>("/livox_undistort", 100);
-  //   sensor_msgs::PointCloud2 pcl_out_msg;
-  //   pcl::toROSMsg(*cur_pcl_un_, pcl_out_msg);
-  //   pcl_out_msg.header.stamp = ros::Time().fromSec(meas.lidar_beg_time);
-  //   pcl_out_msg.header.frame_id = "/livox";
-  //   pub_UndistortPcl.publish(pcl_out_msg);
-  // }
-
-  t3 = omp_get_wtime();
-  
-  // cout<<"[ IMU Process ]: Time: "<<t3 - t1<<endl;
 }
 
 void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_inout, PointCloudXYZI &pcl_out)
 {
   /*** add the imu of the last frame-tail to the of current frame-head ***/
+  // step1 存入数据并记录数据起始时间
   MeasureGroup meas;
   meas = lidar_meas.measures.back();
 
@@ -425,6 +393,7 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
   const double pcl_beg_time = MAX(lidar_meas.lidar_beg_time, lidar_meas.last_update_time);
   
   /*** sort point clouds by offset time ***/
+  // step2 判断从哪个雷达点开始处理，因为处理过图像相关的雷达点已经去过畸变
   pcl_out.clear();
   auto pcl_it = lidar_meas.lidar->points.begin() + lidar_meas.lidar_scan_index_now;
   auto pcl_it_end = lidar_meas.lidar->points.end(); 

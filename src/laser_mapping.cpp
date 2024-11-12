@@ -49,6 +49,8 @@ void LaserMapping::Run(){
     // step2 imu初始化，点云去畸变到雷达扫描结束或图像帧处
     p_imu->Process2(LidarMeasures, state, feats_undistort); 
     state_propagat = state;
+    if(bgnss_en) 
+        p_gnss->addIMUpos(p_imu->IMUpose, MAX(LidarMeasures.lidar_beg_time, LidarMeasures.last_update_time));
 
     if (lidar_selector->debug) LidarMeasures.debug_show();
 
@@ -106,6 +108,8 @@ void LaserMapping::Run(){
             geoQuat = tf::createQuaternionMsgFromRollPitchYaw(euler_cur(0), euler_cur(1), euler_cur(2));
             publish_odometry();
             euler_cur = RotMtoEuler(state.rot_end);
+
+            if(bgnss_en) p_gnss->input_path(LidarMeasures.last_update_time, state.pos_end);
         }
         return;
     }
@@ -230,6 +234,8 @@ void LaserMapping::Run(){
     euler_cur = RotMtoEuler(state.rot_end);
     geoQuat = tf::createQuaternionMsgFromRollPitchYaw(euler_cur(0), euler_cur(1), euler_cur(2));
     publish_odometry();
+    
+    if(bgnss_en) p_gnss->input_path(LidarMeasures.last_update_time, state.pos_end);
 
     t3 = omp_get_wtime();
     map_incremental();
@@ -864,6 +870,7 @@ void LaserMapping::readParameters(ros::NodeHandle &nh)
     lidar_selector->ncc_en = ncc_en;
     lidar_selector->init();
 
+    if(bgnss_en) p_gnss = std::make_shared<GNSSProcessing>(nh);
 
     // step3 imu相关参数设定
     p_imu->set_extrinsic(Lidar_offset_to_IMU, Lidar_rot_to_IMU);
