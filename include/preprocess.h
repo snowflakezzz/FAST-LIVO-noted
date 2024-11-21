@@ -104,16 +104,22 @@ class Preprocess
   void process(const livox_ros_driver::CustomMsg::ConstPtr &msg, PointCloudXYZI::Ptr &pcl_out);
   void process(const sensor_msgs::PointCloud2::ConstPtr &msg, PointCloudXYZI::Ptr &pcl_out);
   void set(bool feat_en, int lid_type, double bld, int pfilt_num);
+  void init();
 
   // sensor_msgs::PointCloud2::ConstPtr pointcloud;
-  PointCloudXYZI pl_full, pl_corn, pl_surf;
+  PointCloudXYZI pl_full, pl_corn, pl_surf;     // pl_surf存储所有点云（不提特征时）
   PointCloudXYZI pl_buff[128]; //maximum 128 line lidar
   vector<orgtype> typess[128]; //maximum 128 line lidar
   int lidar_type, point_filter_num, N_SCANS;
   double blind;
   bool feature_enabled,given_offset_time;
   ros::Publisher pub_full, pub_surf, pub_corn;
-    
+  
+  // 点云法向量提取相关参数
+  double ver_min, ver_max;  // 扫描角度的左右限制 度
+  double hor_fov;           // 视场角
+  int hor_pixel_num;     // 每个线激光点数
+  int normal_neighbor;    // 提取法向量时用多少个相邻点
 
   private:
   void avia_handler(const livox_ros_driver::CustomMsg::ConstPtr &msg);
@@ -126,6 +132,10 @@ class Preprocess
   bool small_plane(const PointCloudXYZI &pl, vector<orgtype> &types, uint i_cur, uint &i_nex, Eigen::Vector3d &curr_direct);
   bool edge_jump_judge(const PointCloudXYZI &pl, vector<orgtype> &types, uint i, Surround nor_dir);
   
+  void extract_normal();
+  int uv2index(const int &u, const int &v);
+  void index2uv(const int &index, int &u, int &v);
+
   int group_size;
   double disA, disB, inf_bound;
   double limit_maxmid, limit_midmin, limit_maxmin;
@@ -135,4 +145,35 @@ class Preprocess
   double edgea, edgeb;
   double smallp_intersect, smallp_ratio;
   double vx, vy, vz;
+
+  double hor_resolution, ver_resolution;
+  vector<double> uv_index;
+  vector<double> index_uv;
+  vector<Eigen::Matrix3d> sp2cart_map;  // 极坐标系转笛卡尔坐标系转换矩阵
+
+  template<typename T>
+  void get_uv(T point, int & u, int & v){
+      float xy_range = std::sqrt(point.x * point.x + point.y * point.y);
+      if(xy_range < 1e-3) {
+          u = -1;
+          v = -1;
+          return;
+      }
+
+      double azimuth =  PI_M - atan2(point.y, point.x);
+      double elevation = atan2(point.z, xy_range);
+
+      int u_ = azimuth / hor_resolution;
+      int v_ = ((ver_max * PI_M/180.0) - elevation) / ver_resolution;
+
+      if(u_ < 0 || u_ >= hor_pixel_num || v_ < 0 || v_ >= N_SCANS) {
+          u = -1;
+          v = -1;
+          return;
+      }
+
+      u = u_;
+      v = v_;
+      return;
+  }
 };

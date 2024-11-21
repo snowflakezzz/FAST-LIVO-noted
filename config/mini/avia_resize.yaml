@@ -1,5 +1,5 @@
 feature_extract_enable : 0
-point_filter_num : 2
+point_filter_num : 1
 max_iteration : 10
 dense_map_enable : 1
 filter_size_surf : 0.15
@@ -15,6 +15,7 @@ ncc_thre: 0
 img_point_cov : 100 # 1000
 laser_point_cov : 0.001 # 0.001
 delta_time: 0.0
+gnss_en: false           # 是否使用gnss观测
 
 common:
     lid_topic:  "/velodyne_points"
@@ -24,6 +25,10 @@ preprocess:
     lidar_type: 2 # 1:Livox Avia LiDAR  2:VELO16  3:OUST64  4:XT32 
     scan_line: 16 # 16  64  32
     blind: 1 # blind x m disable
+    fov: 360  # 视场角
+    scan_rang: 1800 # 水平点数
+    fov_min: -15
+    fov_max: 15
 
 mapping:
     acc_cov_scale: 100
@@ -33,8 +38,6 @@ mapping:
     extrinsic_R: [ 0, 0, -1,
                    0, -1, 0,
                    -1, 0, 0]
-
-
 
 pcd_save:
     pcd_save_en: true

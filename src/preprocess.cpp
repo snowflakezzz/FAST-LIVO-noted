@@ -2,6 +2,9 @@
 
 #define RETURN0     0x00
 #define RETURN0AND1 0x10
+#define NORMAL
+
+cv::Mat normal_img, normal_img_sp;
 
 Preprocess::Preprocess()
   :feature_enabled(0), lidar_type(AVIA), blind(0.01), point_filter_num(1)
@@ -24,6 +27,8 @@ Preprocess::Preprocess()
   smallp_ratio = 1.2;
   given_offset_time = false;
 
+  normal_neighbor = 2;
+
   jump_up_limit = cos(jump_up_limit/180*M_PI);
   jump_down_limit = cos(jump_down_limit/180*M_PI);
   cos160 = cos(cos160/180*M_PI);
@@ -31,6 +36,40 @@ Preprocess::Preprocess()
 }
 
 Preprocess::~Preprocess() {}
+
+void Preprocess::init(){
+    hor_resolution = (hor_fov * PI_M/180.0)/(double)(hor_pixel_num);   // 水平分辨率
+    ver_resolution = ((ver_max-ver_min) * PI_M/180.0)/(double)(N_SCANS); // 垂直分辨率
+    uv_index.resize(hor_pixel_num * N_SCANS);
+    index_uv.resize(hor_pixel_num * N_SCANS);
+
+    sp2cart_map = std::vector<Eigen::Matrix3d>(hor_pixel_num * N_SCANS, Eigen::Matrix3d::Zero(3,3));
+
+    for(int i = 0; i < hor_pixel_num * N_SCANS; ++i) {
+        int u, v;
+        v = i / hor_pixel_num;
+        u = i % hor_pixel_num;
+
+        float psi = M_PI - float(u) * hor_resolution;
+        // float theta = (M_PI - (ver_fov * M_PI/180.0))/2.0 + float(v) * ver_resolution;
+
+        float theta = M_PI/2.0 - (ver_max * M_PI/180.0) + (float(v) * ver_resolution);
+
+        Eigen::Matrix3d & mat = sp2cart_map[i];
+
+        mat(0, 0) = -sin(psi);
+        mat(0, 1) = cos(psi)*cos(theta);
+        mat(0, 2) = cos(psi)*sin(theta);
+
+        mat(1, 0) = cos(psi);
+        mat(1, 1) = sin(psi)*cos(theta);
+        mat(1, 2) = sin(psi)*sin(theta);
+        
+        mat(2, 0) = 0.0;
+        mat(2, 1) = -sin(theta);
+        mat(2, 2) = cos(theta);
+    }
+}
 
 void Preprocess::set(bool feat_en, int lid_type, double bld, int pfilt_num)
 {
@@ -43,6 +82,9 @@ void Preprocess::set(bool feat_en, int lid_type, double bld, int pfilt_num)
 void Preprocess::process(const livox_ros_driver::CustomMsg::ConstPtr &msg, PointCloudXYZI::Ptr &pcl_out)
 {  
   avia_handler(msg);
+  #ifdef NORMAL
+  extract_normal();
+  #endif
   *pcl_out = pl_surf;
 }
 
@@ -66,7 +108,140 @@ void Preprocess::process(const sensor_msgs::PointCloud2::ConstPtr &msg, PointClo
     printf("Error LiDAR Type");
     break;
   }
+
+  #ifdef NORMAL
+  extract_normal();
+  #endif
   *pcl_out = pl_surf;
+}
+
+void Preprocess::index2uv(const int &index, int &u, int &v){
+  int tmp = index_uv[index];
+  v = tmp / hor_pixel_num;
+  u = tmp % hor_pixel_num;
+}
+
+int Preprocess::uv2index(const int &u, const int &v){
+  int tmp = v * hor_pixel_num + u;
+  return uv_index[tmp];
+}
+
+void Preprocess::extract_normal(){
+  if(1){
+    normal_img = cv::Mat(N_SCANS, hor_pixel_num, CV_8UC3, cv::Scalar(0, 0, 0));
+    normal_img_sp = cv::Mat(N_SCANS, hor_pixel_num, CV_8UC3, cv::Scalar(0, 0, 0));
+  }
+
+
+  for(int i=0; i<pl_surf.points.size(); i++){
+    int u, v;
+    index2uv(i, u, v);
+
+    PointType &curr_pt = pl_surf.points[i];
+    if(u + normal_neighbor >= hor_pixel_num || u - normal_neighbor < 0 ||
+      v + normal_neighbor >= N_SCANS || v - normal_neighbor < 0)
+      continue;
+    
+    double dzdpsi_sum = 0.0;
+    double dzdtheta_sum = 0.0;
+    int dpsi_sample_no = 0;
+    int dtheta_sample_no = 0;
+
+    for(int j = -normal_neighbor; j<=normal_neighbor; j++){
+      for(int k = -normal_neighbor; k<=normal_neighbor; k++){
+        int query_i = uv2index(u+j,v+k);
+        PointType &query_pt = pl_surf.points[query_i];
+
+        for(int l=j+1; l<=normal_neighbor; l++){
+          int target_i = uv2index(u+l, v+k);
+          PointType &target_pt = pl_surf.points[target_i];
+          // 此处intensity存储了坐标到原点的距离
+          dzdpsi_sum += (target_pt.intensity - query_pt.intensity)/(double(l-j)*hor_resolution*curr_pt.intensity);
+          ++dpsi_sample_no;
+        }
+
+        for(int l = k+1; l <= normal_neighbor; ++l) {
+          int target_i = uv2index(u+j, v+l);
+          PointType & target_pt = pl_surf.points[target_i];
+
+          dzdtheta_sum += (target_pt.intensity - query_pt.intensity)/(double(l-k)*ver_resolution*curr_pt.intensity);
+          ++dtheta_sample_no;
+        }
+      }
+    }
+
+    if(dpsi_sample_no < normal_neighbor*2 || dtheta_sample_no < normal_neighbor*2) {
+        continue;
+    }
+    double dzdpsi_mean = dzdpsi_sum/double(dpsi_sample_no);
+    double dzdtheta_mean = dzdtheta_sum/double(dtheta_sample_no);
+
+    Eigen::Vector3d normal_sp{dzdpsi_mean, -dzdtheta_mean, 1};
+    normal_sp.normalize();
+
+    Eigen::Vector3d ray_dir{curr_pt.x, curr_pt.y, curr_pt.z};
+    ray_dir.normalize();
+
+    Eigen::Vector3d normal = sp2cart_map[i]*normal_sp;      // 将法向量从球面坐标系转换到笛卡尔坐标系
+    normal.normalize();
+
+    if(normal.dot(ray_dir) > 0) {
+        normal = -normal;
+    }
+
+    double d = -(normal.x()*curr_pt.x + normal.y()*curr_pt.y + normal.z()*curr_pt.z);
+    int valid_neighbors = 0;
+
+    for(int j = -normal_neighbor; j <= normal_neighbor; ++j) {
+        for(int k = -normal_neighbor; k <= normal_neighbor; ++k) {
+            int query_i = uv2index(u+j, v+k);
+            PointType & target_pt = pl_surf.points[query_i];
+            double dist = std::abs(d + normal.x()*target_pt.x + normal.y() * target_pt.y + normal.z() *target_pt.z);
+
+            if(dist < 0.05) {
+                ++valid_neighbors;
+            }
+        }
+    }
+    if(valid_neighbors < (2*normal_neighbor+1)*(2*normal_neighbor+1)/3) {
+        continue;
+    }
+
+    // ofstream out_file(DEBUG_FILE_DIR("normal.txt"), std::ios::app);
+    // out_file << normal.transpose() << endl;
+    // out_file.close();
+
+    curr_pt.normal_x = normal.x();
+    curr_pt.normal_y = normal.y();
+    curr_pt.normal_z = normal.z();
+
+    if(1) {
+        int r = 0;
+        int g = 0;
+        int b = 0;
+        r = int((normal(0)*0.5+0.5) * 255);
+        g = int((normal(1)*0.5+0.5) * 255);
+        b = int((normal(2)*0.5+0.5) * 255);
+        normal_img.at<cv::Vec3b>(v, u) = cv::Vec3b(b, g, r);
+
+        int r_sp = 0;
+        int g_sp = 0;
+        int b_sp = 0;
+        r_sp = int((normal_sp(0)*0.5+0.5) * 255);
+        g_sp = int((normal_sp(1)*0.5+0.5) * 255);
+        b_sp = int((normal_sp(2)*0.5+0.5) * 255);
+
+        normal_img_sp.at<cv::Vec3b>(v, u) = cv::Vec3b(b_sp, g_sp, r_sp);
+    }
+  }
+
+  if(1) {
+      cv::vconcat(normal_img, normal_img_sp, normal_img);
+      cv::imshow("Normal Img", normal_img);
+      cv::imwrite(DEBUG_FILE_DIR("normal.png"), normal_img);
+      cv::waitKey(1);
+  }
+
 }
 
 
@@ -135,6 +310,7 @@ void Preprocess::avia_handler(const livox_ros_driver::CustomMsg::ConstPtr &msg)
   }
   else
   {
+    int index = 0;
     for(uint i=1; i<plsize; i++)
     {
         if((abs(msg->points[i].x - msg->points[i-1].x) < 1e-8) 
@@ -151,10 +327,19 @@ void Preprocess::avia_handler(const livox_ros_driver::CustomMsg::ConstPtr &msg)
 
         if(effect_ind % point_filter_num == 0)
         {
+          #ifdef NORMAL
+            int u,v;
+            get_uv(pl_full[i], u, v);
+            uv_index[v*hor_pixel_num +u] = index;
+            index_uv[index] = v*hor_pixel_num +u;
+            index++;
+          #endif
+
             pl_full[i].x = msg->points[i].x;
             pl_full[i].y = msg->points[i].y;
             pl_full[i].z = msg->points[i].z;
-            pl_full[i].intensity = msg->points[i].reflectivity;
+            // pl_full[i].intensity = msg->points[i].reflectivity;
+            pl_full[i].intensity = common::calc_range(pl_full[i]);
             pl_full[i].curvature = msg->points[i].offset_time / float(1000000); //use curvature as time of each laser points
             pl_surf.push_back(pl_full[i]);
         }
@@ -230,6 +415,7 @@ void Preprocess::oust64_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
   else
   {
     double time_stamp = msg->header.stamp.toSec();
+    int index = 0;
     // cout << "===================================" << endl;
     // printf("Pt size = %d, N_SCANS = %d\r\n", plsize, N_SCANS);
     for (int i = 0; i < pl_orig.points.size(); i++)
@@ -240,12 +426,21 @@ void Preprocess::oust64_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
       
       if (range < (blind * blind)) continue;
       
+      #ifdef NORMAL
+      int u,v;
+      get_uv(pl_orig.points[i], u, v);
+      uv_index[u*hor_pixel_num +v] = index;
+      index_uv[index] = v*hor_pixel_num +u;
+      index++;
+      #endif
+
       Eigen::Vector3d pt_vec;
       PointType added_pt;
       added_pt.x = pl_orig.points[i].x;
       added_pt.y = pl_orig.points[i].y;
       added_pt.z = pl_orig.points[i].z;
-      added_pt.intensity = pl_orig.points[i].intensity;
+      // added_pt.intensity = pl_orig.points[i].intensity;
+      added_pt.intensity = common::calc_range(added_pt);
       added_pt.normal_x = 0;
       added_pt.normal_y = 0;
       added_pt.normal_z = 0;
@@ -376,6 +571,7 @@ void Preprocess::velodyne_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
     }
     else
     {
+      int index = 0;
       for (int i = 0; i < plsize; i++)
       {
         PointType added_pt;
@@ -424,6 +620,14 @@ void Preprocess::velodyne_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
         {
           if(added_pt.x*added_pt.x+added_pt.y*added_pt.y+added_pt.z*added_pt.z > (blind * blind))
           {
+            #ifdef NORMAL
+            int u,v;
+            get_uv(added_pt, u, v);
+            uv_index[v*hor_pixel_num +u] = index;
+            index_uv[index] = v*hor_pixel_num +u;
+            index++;
+            added_pt.intensity = common::calc_range(added_pt);
+            #endif
             pl_surf.points.push_back(added_pt);
           }
         }
@@ -441,7 +645,7 @@ void Preprocess::xt32_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
   pl_surf.reserve(plsize);
 
   double time_head = pl_orig.points[0].timestamp;
-
+  int index = 0;
   for (int i = 0; i < plsize; i++)
   {
     PointType added_pt;
@@ -459,6 +663,14 @@ void Preprocess::xt32_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
     {
       if (added_pt.x * added_pt.x + added_pt.y * added_pt.y + added_pt.z * added_pt.z > blind)
       {
+        #ifdef NORMAL
+        int u,v;
+        get_uv(added_pt, u, v);
+        uv_index[v*hor_pixel_num +u] = index;
+        index_uv[index] = v*hor_pixel_num +u;
+        index++;
+        added_pt.intensity = common::calc_range(added_pt);
+        #endif
         pl_surf.points.push_back(added_pt);
       }
     }

@@ -241,9 +241,9 @@ void LaserMapping::Run(){
     map_incremental();
     t5 = omp_get_wtime();
     kdtree_incremental_time = t5 - t3; // + readd_time;
-    ofstream out_file(DEBUG_FILE_DIR("kdtree_incremental_time.txt"), std::ios::app);
-    out_file << kdtree_incremental_time << endl;
-    out_file.close();
+    // ofstream out_file(DEBUG_FILE_DIR("kdtree_incremental_time.txt"), std::ios::app);
+    // out_file << kdtree_incremental_time << endl;
+    // out_file.close();
 
     PointCloudXYZI::Ptr laserCloudFullRes(dense_map_en ? feats_undistort : feats_down_body);          
     int size = laserCloudFullRes->points.size();
@@ -796,11 +796,20 @@ void LaserMapping::readParameters(ros::NodeHandle &nh)
     nh.param<double>("cube_side_length",cube_len,200);
     nh.param<double>("mapping/gyr_cov_scale",gyr_cov_scale,1.0);
     nh.param<double>("mapping/acc_cov_scale",acc_cov_scale,1.0);
+
+    // 预处理相关参数设置
     nh.param<double>("preprocess/blind", p_pre->blind, 0.01);
     nh.param<int>("preprocess/lidar_type", p_pre->lidar_type, AVIA);
     nh.param<int>("preprocess/scan_line", p_pre->N_SCANS, 16);
     nh.param<int>("point_filter_num", p_pre->point_filter_num, 2);
     nh.param<bool>("feature_extract_enable", p_pre->feature_enabled, 0);
+    nh.param<double>("preprocess/fov", p_pre->hor_fov, 360);
+    nh.param<int>("preprocess/scan_rang", p_pre->hor_pixel_num, 3600);
+    nh.param<double>("preprocess/fov_min", p_pre->ver_min, -15);
+    nh.param<double>("preprocess/fov_max", p_pre->ver_max, 15);
+    nh.param<int>("preprocess/normal_neighbor", p_pre->normal_neighbor, 2);
+    p_pre->init();
+
     nh.param<vector<double>>("mapping/extrinsic_T", extrinT, vector<double>());
     Lidar_offset_to_IMU << VEC_FROM_ARRAY(extrinT);
     nh.param<vector<double>>("mapping/extrinsic_R", extrinR, vector<double>());

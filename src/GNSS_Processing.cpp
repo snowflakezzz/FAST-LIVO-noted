@@ -93,14 +93,28 @@ void GNSSProcessing::addIMUpos(const vector<Pose6D> &IMUpose, const double pcl_b
             if(gnss_t >= time-0.01 && gnss_t <= time+0.01){
                 // 去除gnss飞点
                 Eigen::Vector3d odo_pos(VEC_FROM_ARRAY(item.pos));
-                if(common::calc_dist(odo_pos, gnss_msg.blh)>3)
-                    break;
+                if(is_has_yaw_){
+                    Eigen::Vector3d gnss_pos = common::gnss_trans(gnss_msg.blh, yaw_);
+                    if(common::calc_dist(odo_pos, gnss_pos)>3){
+                        ofstream fout(DEBUG_FILE_DIR("delta.txt"),ios::app);
+                        fout << fixed << setprecision(3) << common::calc_dist(odo_pos, gnss_pos) << endl;
+                        fout.close();
+                        break;
+                    }
+                }
 
                 odo_path_[time] = odo_pos;
                 gnss_buffer_[time] = gnss_msg;
                 last_gnss_ = gnss_msg;
                 last_gnss_time_ = time;
-                if(gnss_buffer_.size()>1) ready_comp_ = true;
+
+                if(!is_has_yaw_ && gnss_buffer_.size() > 1){
+                    Initialization();
+                    is_has_yaw_ = true;
+                    break;
+                }
+                
+                ready_comp_ = true;
                 break;
             }
         }
@@ -169,11 +183,6 @@ bool GNSSProcessing::optimize(){
         if(ready_comp_){
             ready_comp_ = false;
 
-            if(!is_has_yaw_){
-                Initialization();
-                continue;
-            }
-
             ceres::Problem problem;
             ceres::Solver::Options options;
             options.linear_solver_type = ceres::SPARSE_NORMAL_CHOLESKY;
@@ -222,6 +231,10 @@ bool GNSSProcessing::optimize(){
             }
 
             ceres::Solve(options, &problem, &summary);
+
+            ofstream fout(DEBUG_FILE_DIR("after.txt"),ios::app);
+            fout << fixed << setprecision(3) << t_array[0][0] << endl;
+            fout.close();
             
             if(0)
             { // gnss卡方检测并给gnss观测赋予新的权重

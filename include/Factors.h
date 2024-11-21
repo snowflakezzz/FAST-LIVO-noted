@@ -22,10 +22,7 @@ public:
 
         Eigen::Map<Eigen::Matrix<double, 3, 1>> error(residuals);
 
-        Eigen::Matrix3d R_gnss_odo;
-        R_gnss_odo << cos(yaw_), -sin(yaw_), 0, sin(yaw_), cos(yaw_), 0, 0, 0, 1;
-
-        error = p + lever_ - R_gnss_odo.transpose() * gnss_.blh;
+        error = p + lever_ - common::gnss_trans(gnss_.blh, yaw_);
 
         ofstream fout(DEBUG_FILE_DIR("residual.txt"), std::ios::app);
         fout << "gnss factor residual: " << error.transpose() << endl;

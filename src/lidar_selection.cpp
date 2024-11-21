@@ -574,7 +574,7 @@ void LidarSelector::addFromSparseMap(cv::Mat img, PointCloudXYZI::Ptr pg)
             {
                 error += (patch_wrap[ind]-patch_cache[ind]) * (patch_wrap[ind]-patch_cache[ind]);
             }
-            // 如果两patch块光度误差大于阈值，则不适用该特征
+            // 如果两patch块光度误差大于阈值，则不使用该特征
             if(error > outlier_threshold*patch_size_total) continue;
             
             sub_map_cur_frame_.push_back(pt);

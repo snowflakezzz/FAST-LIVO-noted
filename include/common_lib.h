@@ -84,6 +84,17 @@ inline float calc_dist(const PointType &p1, const PointType &p2) {
 inline float calc_dist(const Eigen::Vector3f &p1, const Eigen::Vector3f &p2) { return (p1 - p2).squaredNorm(); }
 
 inline float calc_dist(const Eigen::Vector3d &p1, const Eigen::Vector3d &p2) { return (p1 - p2).squaredNorm(); }
+
+inline Vector3d gnss_trans(const Eigen::Vector3d &p, const double yaw) {
+    Eigen::Matrix3d R_gnss_odo;
+    R_gnss_odo << cos(yaw), -sin(yaw), 0, sin(yaw), cos(yaw), 0, 0, 0, 1;
+    return R_gnss_odo.transpose() * p;
+}
+
+template <typename PointT>
+inline float calc_range(PointT& p){
+    return std::sqrt(p.x*p.x + p.y*p.y + p.z*p.z);
+}
 }
 
 

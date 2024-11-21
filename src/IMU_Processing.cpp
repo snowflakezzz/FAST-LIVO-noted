@@ -23,7 +23,7 @@ ImuProcess::ImuProcess()
   cov_gyr       = V3D(0.1, 0.1, 0.1);
   cov_acc_scale = V3D(1, 1, 1);
   cov_gyr_scale = V3D(1, 1, 1);
-  cov_bias_gyr  = V3D(0.1, 0.1, 0.1);
+  cov_bias_gyr  = V3D(0.1, 0.1, 0.1);     // 零偏不稳定性
   cov_bias_acc  = V3D(0.1, 0.1, 0.1);
   mean_acc      = V3D(0, 0, -1.0);
   mean_gyr      = V3D(0, 0, 0);
@@ -147,22 +147,22 @@ void ImuProcess::IMU_init(const MeasureGroup &meas, StatesGroup &state_inout, in
 
   if(is_zero_velocity)
   {
-    Vector3d gdir = Vector3d(0, 0, -1.0);
-    state_inout.gravity = -1.0 * gdir * G_m_s2;  // 重力得和imu系相反，因为UndistortPcl
+    // Vector3d gdir = Vector3d(0, 0, -1.0);
+    // state_inout.gravity = gdir * G_m_s2;  // UndistortPcl
 
-    // 首帧调整为水平方向，todo：杆臂也得调整
-    Vector3d diracc = mean_acc / mean_acc.norm();
-    Vector3d axis = gdir.cross(diracc);
-    axis  /= axis.norm();
-    double cosg = gdir.dot(diracc);
-    double ang = acos(cosg);
-    M3D R_g_imu = AngleAxisd(ang, axis).matrix();
+    // // 首帧调整为水平方向，todo：杆臂也得调整
+    // Vector3d diracc = mean_acc / mean_acc.norm();
+    // Vector3d axis = gdir.cross(diracc);
+    // axis  /= axis.norm();
+    // double cosg = gdir.dot(diracc);
+    // double ang = acos(cosg);
+    // M3D R_g_imu = AngleAxisd(ang, axis).matrix();
 
-    state_inout.rot_end = R_g_imu;
-    state_inout.bias_g  = mean_gyr;
-
-    // state_inout.gravity = -mean_acc / mean_acc.norm() * G_m_s2;
+    // state_inout.rot_end = R_g_imu;
     // state_inout.bias_g  = mean_gyr;
+
+    state_inout.gravity = -mean_acc / mean_acc.norm() * G_m_s2;
+    state_inout.bias_g  = mean_gyr;
 
     cov_acc = cov_acc * pow(G_m_s2 / mean_acc.norm(), 2);
     cov_acc = cov_acc.cwiseProduct(cov_acc_scale);
