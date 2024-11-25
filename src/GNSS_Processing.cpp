@@ -52,6 +52,75 @@ void GNSSProcessing::input_gnss(const sensor_msgs::NavSatFix::ConstPtr& msg_in)
     gnss_mutex_.unlock();
 }
 
+void GNSSProcessing::readrtkresult(const string gnss_path){
+    std::ifstream rtk_file(gnss_path);
+    if(!rtk_file.is_open()){
+        cout << "wrong path to rtk result!" << endl;
+        return;
+    }
+
+    string line;
+    while(std::getline(rtk_file, line)){
+
+        if(line.find("END_HEAD")!=std::string::npos) break;
+    }
+    std::getline(rtk_file, line);
+
+    std::getline(rtk_file, line);
+    int col = 0; vector<int> col_idx;
+    string value; stringstream ss(line);
+    while(ss >> value){
+        if(value == "Week") col_idx.push_back(col+1);
+        else if(value == "GPSTime") col_idx.push_back(col+1);  // 时间有两个值 所以要+1跳过
+        else if(value == "X-ECEF") col_idx.push_back(col+1);
+        else if(value == "Y-ECEF") col_idx.push_back(col+1);
+        else if(value == "Z-ECEF") col_idx.push_back(col+1);
+        else if(value == "SD-E") col_idx.push_back(col+5);    // ENU方向的方差 标准差要开方
+        else if(value == "SD-N") col_idx.push_back(col+5);
+        else if(value == "SD-U") col_idx.push_back(col+5);
+        else if(value == "AR") col_idx.push_back(col+5);      // 固定情况，大于等于3时说明模糊度固定了
+        col++;
+    }
+    std::getline(rtk_file, line);
+
+    while(std::getline(rtk_file, line)){
+        stringstream ss(line);
+        col = 0;
+        int week, AR;  double sow;
+        Vector3d ecef; Vector3d enustd;
+        
+        while(ss >> value){
+            if(col==col_idx[0]) week = atoi(value.c_str());
+            else if(col==col_idx[1]) sow = stod(value);
+            else if(col==col_idx[2]) ecef.x() = stod(value);
+            else if(col==col_idx[3]) ecef.y() = stod(value);
+            else if(col==col_idx[4]) ecef.z() = stod(value);
+            else if(col==col_idx[5]) enustd.x() = stod(value);
+            else if(col==col_idx[6]) enustd.y() = stod(value);
+            else if(col==col_idx[7]) enustd.z() = stod(value);
+            else if(col==col_idx[8]) AR = atoi(value.c_str());
+            col++;
+        }
+
+        if(!is_origin_set){
+            anchor_ = ecef;
+            is_origin_set = true;
+        }
+
+        if(AR>=3){
+            GNSS gnss;
+            Earth::gps2unix(week, sow, gnss.time);
+            gnss.blh  = Earth::ecef2local(anchor_, ecef);
+            gnss.std  = enustd;
+            gnss_mutex_.lock();
+            gnss_queue_.push(gnss);
+            gnss_mutex_.unlock();
+        }
+    }
+
+    cout << "read gnss result successfully!" << endl;
+}
+
 void GNSSProcessing::input_path(const double &cur_time, const Eigen::Vector3d &position){
     Vector3d pos = position;
     double time = cur_time;

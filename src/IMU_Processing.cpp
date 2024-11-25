@@ -147,22 +147,23 @@ void ImuProcess::IMU_init(const MeasureGroup &meas, StatesGroup &state_inout, in
 
   if(is_zero_velocity)
   {
-    // Vector3d gdir = Vector3d(0, 0, -1.0);
-    // state_inout.gravity = gdir * G_m_s2;  // UndistortPcl
+    Vector3d gdir = Vector3d(0, 0, -1.0);
+    double scale = mean_acc.z() > 0 ? -1 : 1;     // 判断目前imu时什么方向
+    state_inout.gravity = scale * gdir * G_m_s2;  // UndistortPcl
 
-    // // 首帧调整为水平方向，todo：杆臂也得调整
-    // Vector3d diracc = mean_acc / mean_acc.norm();
-    // Vector3d axis = gdir.cross(diracc);
-    // axis  /= axis.norm();
-    // double cosg = gdir.dot(diracc);
-    // double ang = acos(cosg);
-    // M3D R_g_imu = AngleAxisd(ang, axis).matrix();
+    // 首帧调整为水平方向，todo：杆臂也得调整
+    Vector3d diracc = mean_acc / mean_acc.norm();
+    Vector3d axis = gdir.cross(diracc);
+    axis  /= axis.norm();
+    double cosg = gdir.dot(diracc);
+    double ang = acos(cosg);
+    M3D R_g_imu = AngleAxisd(ang, axis).matrix();
 
-    // state_inout.rot_end = R_g_imu;
-    // state_inout.bias_g  = mean_gyr;
-
-    state_inout.gravity = -mean_acc / mean_acc.norm() * G_m_s2;
+    state_inout.rot_end = R_g_imu;
     state_inout.bias_g  = mean_gyr;
+
+    // state_inout.gravity = -mean_acc / mean_acc.norm() * G_m_s2;
+    // state_inout.bias_g  = mean_gyr;
 
     cov_acc = cov_acc * pow(G_m_s2 / mean_acc.norm(), 2);
     cov_acc = cov_acc.cwiseProduct(cov_acc_scale);
@@ -445,7 +446,7 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
 
     // 零偏修正
     angvel_avr -= state_inout.bias_g;
-    acc_avr     = acc_avr * G_m_s2 / mean_acc.norm() - state_inout.bias_a;    // G_m_s2 / mean_acc.norm()相当于修正了一个轴系误差
+    acc_avr     = acc_avr * G_m_s2 / mean_acc.norm() - state_inout.bias_a;    // G_m_s2 / mean_acc.norm()相当于修正了一个线性比例因子误差
 
     if(head->header.stamp.toSec() < last_lidar_end_time_)
     {

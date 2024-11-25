@@ -6,6 +6,7 @@
 using Eigen::Vector3d;
 using Eigen::Matrix3d;
 
+#define GPS_LEAP_SECOND 18
 const double WGS84_WIE = 7.2921151467E-5;       // 地球自转角速度
 const double WGS84_F   = 0.0033528106647474805; // 扁率
 const double WGS84_RA  = 6378137.0000000000;    // 长半轴a
@@ -47,6 +48,26 @@ public:
         return {rnh * coslat * coslon, rnh * coslat * sinlon, (rnh - rn * WGS84_E1) * sinlat};
     }
 
+    static Vector3d ecef2blh(const Vector3d &ecef) {
+        double p = sqrt(ecef[0] * ecef[0] + ecef[1] * ecef[1]);
+        double rn;
+        double lat, lon;
+        double h = 0, h2;
+
+        // 初始状态
+        lat = atan(ecef[2] / (p * (1.0 - WGS84_E1)));
+        lon = 2.0 * atan2(ecef[1], ecef[0] + p);
+
+        do {
+            h2  = h;
+            rn  = RN(lat);
+            h   = p / cos(lat) - rn;
+            lat = atan(ecef[2] / (p * (1.0 - WGS84_E1 * rn / (rn + h))));
+        } while (fabs(h - h2) > 1.0e-4);
+
+        return {lat, lon, h};
+    }
+
     // rotation from local to ecef
     static Matrix3d cne(const Vector3d &blh){
         double coslat, sinlat, coslon, sinlon;
@@ -71,14 +92,32 @@ public:
 
         return dcm;
     }
+
     // origin: 锚点, global: 待转换点blh坐标 输入必须为弧度
     static Vector3d global2local(const Vector3d &origin, const Vector3d &global){
-        Vector3d ecef0  =   blh2ecef(origin);
+        Vector3d ecef0  =   blh2ecef(origin);       // ecef坐标
         Matrix3d cn0e   =   cne(origin);
 
         Vector3d ecef1  =   blh2ecef(global);
 
         return cn0e.transpose() * (ecef1 - ecef0);
     }
+
+    static Vector3d ecef2local(const Vector3d &anchor, const Vector3d &ecef){
+        Vector3d anc_blh = ecef2blh(anchor);
+        Matrix3d cne0 = cne(anc_blh);
+        return cne0.transpose() * (ecef - anchor);
+    }
+
+    static void gps2unix(int week, double sow, double &unixs) {
+        unixs = sow + week * 604800 + 315964800 - GPS_LEAP_SECOND;
+    };
+
+    static void unix2gps(double unixs, int &week, double &sow) {
+        double seconds = unixs + GPS_LEAP_SECOND - 315964800;
+
+        week = std::floor(seconds / 604800);
+        sow  = seconds - week * 604800;
+    };
 };
 #endif

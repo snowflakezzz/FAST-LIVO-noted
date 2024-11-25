@@ -15,7 +15,8 @@ ncc_thre: 0
 img_point_cov : 100 # 1000
 laser_point_cov : 0.001 # 0.001
 delta_time: 0.0         # camera与lidar时偏 =lidar时间 - camera时间
-gnss_en: true           # 是否使用gnss观测
+gnss:
+    gnss_en: 0           # 是否使用gnss观测
 
 common:
     lid_topic:  "/velodyne_points"
@@ -32,7 +33,7 @@ preprocess:
     fov_max: 10
 
 mapping:
-    acc_cov_scale: 100      # imu方差
+    acc_cov_scale: 100    # imu方差
     gyr_cov_scale: 10000
     # imu to lidar
     extrinsic_T: [0,0,0] # horizon 0.05512, 0.02226, -0.0297

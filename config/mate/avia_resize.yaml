@@ -16,13 +16,13 @@ img_point_cov : 100 # 1000
 laser_point_cov : 0.001 # 0.001
 delta_time: 0.0
 gnss:
-    path: "/home/zxq/sda8/mini_24-07-02/gnss_result_100C.ffp"   # 如果不设置该值就默认从ros包中获取gnss数据
-    gnss_en: true           # 是否使用gnss观测
+    # path: "/home/zxq/sda8/mini_24-07-02/gnss_result_100C.ffp"   # 如果不设置该值就默认从ros包中获取gnss数据
+    gnss_en: 0           # 是否使用gnss观测
 
 
 common:
-    lid_topic:  "/velodyne_points"
-    imu_topic:  "/imu_raw"
+    lid_topic:  "/cmu_sp1/velodyne_packets"
+    imu_topic:  "/cmu_sp1/imu/data"
 
 preprocess:
     lidar_type: 2 # 1:Livox Avia LiDAR  2:VELO16  3:OUST64  4:XT32 
@@ -38,22 +38,24 @@ mapping:
     gyr_cov_scale: 10000
     # imu to lidar
     extrinsic_T: [0,0,0.03411] # horizon 0.05512, 0.02226, -0.0297
-    extrinsic_R: [ 0, 0, -1,
-                   0, -1, 0,
-                   -1, 0, 0]
+    extrinsic_R: [ 0.999945562, 0.009074807,  0.005149763,
+                -0.009060897, 0.999955255, -0.002718066,
+                -0.005174199, 0.002671256,  0.999983046,
+                0.000000000, 0.000000000,  0.000000000]
 
 pcd_save:
     pcd_save_en: true
 
 camera:
-    img_topic: /cam00/image_raw/compressed
+    img_topic: /cmu_sp1/camera_1/image_raw
     # imu to camera
     # Rcl: [0.00162756,-0.999991,0.00390957,
     #      -0.0126748,-0.00392989,-0.999912,
     #       0.999918,0.00157786,-0.012681]
     # Pcl: [0.0409257, 0.0318424, -0.0927219]
     # body to image
-    extrinsic_T: [0.04323875, -0.13672538, -0.13344563]
-    extrinsic_R: [0.00553725,  0.99830489,  0.05793686, 
-                 0.99979833, -0.00440848, -0.01959246, 
-                -0.01930383,  0.05803366, -0.99812798]
+    extrinsic_T: [ 0.17409098, 0.04962189, -0.02152957]
+    extrinsic_R: [0.00373945,  0.00244390, 0.99999002,
+            -0.99989234, -0.01418010, 0.00377374,
+            0.01418918, -0.99989647, 0.00239061,
+            0.00000000,  0.00000000, 0.00000000]

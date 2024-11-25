@@ -38,6 +38,8 @@ public:
 
     void addIMUpos(const vector<Pose6D> &IMUpose, const double pcl_beg_time);
     
+    void readrtkresult(const string gnss_path);
+
 private:
     void Initialization();
 

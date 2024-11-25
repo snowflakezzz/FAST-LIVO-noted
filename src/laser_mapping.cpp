@@ -241,9 +241,9 @@ void LaserMapping::Run(){
     map_incremental();
     t5 = omp_get_wtime();
     kdtree_incremental_time = t5 - t3; // + readd_time;
-    // ofstream out_file(DEBUG_FILE_DIR("kdtree_incremental_time.txt"), std::ios::app);
-    // out_file << kdtree_incremental_time << endl;
-    // out_file.close();
+    ofstream out_file(DEBUG_FILE_DIR("kdtree_incremental_time.txt"), std::ios::app);
+    out_file << kdtree_incremental_time << endl;
+    out_file.close();
 
     PointCloudXYZI::Ptr laserCloudFullRes(dense_map_en ? feats_undistort : feats_down_body);          
     int size = laserCloudFullRes->points.size();
@@ -775,7 +775,7 @@ void LaserMapping::readParameters(ros::NodeHandle &nh)
     nh.param<int>("dense_map_enable",dense_map_en,1);
     nh.param<int>("img_enable",img_en,1);
     nh.param<int>("lidar_enable",lidar_en,1);
-    nh.param<int>("gnss_en", bgnss_en, 1);
+    nh.param<int>("gnss/gnss_en", bgnss_en, 0);
     nh.param<int>("debug", debug, 0);
     nh.param<int>("max_iteration",NUM_MAX_ITERATIONS,4);
     nh.param<bool>("ncc_en",ncc_en,false);
@@ -879,7 +879,12 @@ void LaserMapping::readParameters(ros::NodeHandle &nh)
     lidar_selector->ncc_en = ncc_en;
     lidar_selector->init();
 
-    if(bgnss_en) p_gnss = std::make_shared<GNSSProcessing>(nh);
+    if(bgnss_en){
+        p_gnss = std::make_shared<GNSSProcessing>(nh);
+        string gnss_path;
+        nh.param<string>("gnss/path", gnss_path, "");
+        if(!gnss_path.empty()) p_gnss->readrtkresult(gnss_path);
+    }
 
     // step3 imu相关参数设定
     p_imu->set_extrinsic(Lidar_offset_to_IMU, Lidar_rot_to_IMU);
