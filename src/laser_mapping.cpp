@@ -24,6 +24,8 @@ LaserMapping::LaserMapping()
     laserCloudOri = boost::make_shared<PointCloudXYZI>();
 
     flg_first_scan = true;
+
+    pathout.open(DEBUG_FILE_DIR("tum.txt"), std::ios::out);
 }
 
 void LaserMapping::Run(){
@@ -114,9 +116,10 @@ void LaserMapping::Run(){
         return;
     }
 
-    // step4 点云降采样，并初始化ikdtree的局部地图
+    // step4 点云降采样，并初始化局部地图
     downSizeFilterSurf.setInputCloud(feats_undistort);
     downSizeFilterSurf.filter(*feats_down_body);
+    // feats_down_body = feats_undistort;
 
     #ifdef USE_ikdtree
     if(ikdtree.Root_Node == nullptr)
@@ -131,8 +134,10 @@ void LaserMapping::Run(){
     int featsFromMapNum = ikdtree.size();
     #else
     if (flg_first_scan){
-        ivox_->AddPoints(feats_down_body->points);
-        flg_first_scan = false;
+        // if(feats_down_body->points.size() > 5) {
+            ivox_->AddPoints(feats_down_body->points);
+            flg_first_scan = false;
+        // }
         return;
     }
     #endif
@@ -164,18 +169,16 @@ void LaserMapping::Run(){
         for (int iterCount = -1; iterCount < NUM_MAX_ITERATIONS && flg_EKF_inited; iterCount++ )
         {
             // step5.1 构建残差及雅各比
-            MatrixXd Hsub;
-            VectorXd meas_vec;
-            h_share_model(Hsub, meas_vec);
+            MatrixXd HTH;  VectorXd HTL;
+            h_share_model(HTH, HTL);
 
             MatrixXd K(DIM_STATE, effct_feat_num);
             EKF_stop_flg = false;
             flg_EKF_converged = false;
 
             // step5.2 误差状态卡尔曼滤波更新
-            auto &&Hsub_T = Hsub.transpose();
-            auto &&HTz = Hsub_T * meas_vec;
-            H_T_H.block<6,6>(0,0) = Hsub_T * Hsub;
+            auto &&HTz = HTL;
+            H_T_H.block<6,6>(0,0) = HTH;
             MD(DIM_STATE, DIM_STATE) &&K_1 = \
                     (H_T_H + (state.cov / LASER_POINT_COV).inverse()).inverse();
             G.block<DIM_STATE,6>(0,0) = K_1.block<DIM_STATE,6>(0,0) * H_T_H.block<6,6>(0,0);
@@ -336,7 +339,8 @@ void LaserMapping::map_incremental()
         PointType &point_world = feats_down_world->points[i];
         if (!Nearest_Points[i].empty() && flg_EKF_inited) {
             const PointVector &points_near = Nearest_Points[i];
-
+            
+            // 计算该点对应voxel的中心点
             Eigen::Vector3f center =
                 ((point_world.getVector3fMap() / filter_size_map_min).array().floor() + 0.5) * filter_size_map_min;
 
@@ -347,7 +351,7 @@ void LaserMapping::map_incremental()
                 fabs(dis_2_center.z()) > 0.5 * filter_size_map_min) {
                 point_no_need_downsample.emplace_back(point_world);
                 return;
-            }
+            }   // 该点最近邻点离中心点太远，直接添加
 
             bool need_add = true;
             float dist = common::calc_dist(point_world.getVector3fMap(), center);
@@ -375,8 +379,90 @@ void LaserMapping::map_incremental()
     #endif
 }
 
+#ifdef USE_VGICP
+// VGICP构建观测方程
+void LaserMapping::h_share_model(MatrixXd &HPH, VectorXd &HPL)
+{
+    std::shared_ptr<IVoxType> ivox_input = std::make_shared<IVoxType>(ivox_options_);
+    ivox_input->AddPoints(feats_undistort->points);     // 利用未稀疏化的点来计算点的方差
+
+    HPH.resize(6,6);
+    HPL.resize(6);
+
+    int k_corre = 5;    // 用于计算方差的最近邻点个数
+    for(int i=0; i<feats_down_size; i++){
+        // step1 计算点云的世界坐标
+        PointType &point_body  = feats_down_body->points[i];
+        PointType &point_world = feats_down_world->points[i];
+        V3D p_body(point_body.x, point_body.y, point_body.z);
+        pointBodyToWorld(&point_body, &point_world);
+        V3D p_word(point_world.x, point_world.y, point_world.z);
+
+        // step2 最近邻搜索
+        auto &points_near = Nearest_Points[i];
+        uint8_t search_flag = 0;  
+        double search_start = omp_get_wtime();
+        if (nearest_search_en){
+            ivox_->GetClosestPoint(point_world, points_near, NUM_MATCH_POINTS);     // ivoxel搜索的时候已经考虑到最远距离
+            kdtree_search_counter ++;                        
+        }
+        if (points_near.size() < NUM_MATCH_POINTS) continue;
+
+        // step3 计算最近邻点的方差
+        M3D cov_B = M3D::Zero();   V3D mean_B = V3D::Zero();
+        int valid_num = 0;
+        for(int idx=0; idx<NUM_MATCH_POINTS; ++idx){
+            PointVector point_near_near(k_corre);
+            ivox_->GetClosestPoint(points_near[idx], point_near_near, k_corre);
+            if(point_near_near.size() < k_corre) continue;
+
+            Eigen::Matrix<double, 3, -1> neighbors(3, k_corre);
+            for(int j=0; j<k_corre; ++j){
+                neighbors.col(j) = V3D(point_near_near[j].x, point_near_near[j].y, point_near_near[j].z);
+            }
+            neighbors.colwise() -= neighbors.rowwise().mean().eval();
+            Matrix3d cov = neighbors * neighbors.transpose() / k_corre;
+            cov_B += cov;
+            mean_B += V3D(points_near[idx].x, points_near[idx].y, points_near[idx].z);
+            valid_num++;
+        }
+        mean_B /= valid_num;
+        cov_B /= valid_num;
+
+        // step4 计算方差
+        PointVector near_points;
+        ivox_input->GetClosestPoint(point_body, near_points, k_corre);
+
+        int neighbor_num = near_points.size();
+        Eigen::Matrix<double, 3, -1> neighbors(3, neighbor_num);
+        for(int j=0; j<neighbor_num; ++j){
+            neighbors.col(j) = V3D(near_points[j].x, near_points[j].y, near_points[j].z);
+        }
+        neighbors.colwise() -= neighbors.rowwise().mean().eval();
+        M3D cov_A = neighbors * neighbors.transpose() / neighbor_num;
+
+        // step5 残差计算
+        M3D rotation = state.rot_end * Lidar_rot_to_IMU;
+        M3D maha = cov_B + rotation*cov_A*rotation.transpose();
+        M3D mahalanobis = maha.inverse();
+        V3D error = mean_B - p_word;
+        Eigen::Matrix<double, 3, 6> dedx = Eigen::Matrix<double, 3, 6>::Zero();
+        dedx.block<3, 3>(0, 0) = common::skewd(p_word);
+        dedx.block<3, 3>(0, 3) = -Eigen::Matrix3d::Identity();
+
+        // double w = std::sqrt(NUM_MATCH_POINTS);
+        double w = 1.0;
+        Matrix<double, 6, 6> Hi = w * dedx.transpose() * mahalanobis * dedx;
+        Matrix<double, 6, 1> bi = w * dedx.transpose() * mahalanobis * error;
+
+        HPH += Hi;
+        HPL += bi;
+    }
+}
+
+#else
 // 返回观测矩阵构建成功
-void LaserMapping::h_share_model(MatrixXd &Hsub, VectorXd &meas_vec)
+void LaserMapping::h_share_model(MatrixXd &HPH, VectorXd &HPL)
 {
     PointCloudXYZI::Ptr normvec(new PointCloudXYZI());
     normvec->resize(feats_down_size);
@@ -409,10 +495,10 @@ void LaserMapping::h_share_model(MatrixXd &Hsub, VectorXd &meas_vec)
         if (nearest_search_en){
             #ifdef USE_ikdtree
             ikdtree.Nearest_Search(point_world, NUM_MATCH_POINTS, points_near, pointSearchSqDis);
-            #else
-            ivox_->GetClosestPoint(point_world, points_near, NUM_MATCH_POINTS);
-            #endif
             point_selected_surf[i] = pointSearchSqDis[NUM_MATCH_POINTS - 1] > 5 ? false : true;
+            #else
+            ivox_->GetClosestPoint(point_world, points_near, NUM_MATCH_POINTS);     // ivoxel搜索的时候已经考虑到最远距离
+            #endif
             kdtree_search_counter ++;                        
         }
 
@@ -455,8 +541,8 @@ void LaserMapping::h_share_model(MatrixXd &Hsub, VectorXd &meas_vec)
     res_mean_last = total_residual / effct_feat_num;
 
     // step5 计算观测雅各比
-    Hsub.resize(effct_feat_num, 6);   // 观测雅各比矩阵
-    meas_vec.resize(effct_feat_num);  // 观测残差矩阵
+    HPH.resize(6, 6); HPH.setZero();
+    HPL.resize(6); HPL.setZero();
 
     for (int i = 0; i < effct_feat_num; i++)
     {
@@ -472,12 +558,17 @@ void LaserMapping::h_share_model(MatrixXd &Hsub, VectorXd &meas_vec)
 
         /*** calculate the Measuremnt Jacobian matrix H ***/
         V3D A(point_crossmat * state.rot_end.transpose() * norm_vec);
-        Hsub.row(i) << VEC_FROM_ARRAY(A), norm_p.x, norm_p.y, norm_p.z;
+
+        Eigen::Matrix<double, 1, 6> Hsub;
+        Hsub << VEC_FROM_ARRAY(A), norm_p.x, norm_p.y, norm_p.z;
+        HPH += Hsub.transpose() * Hsub;
 
         /*** Measuremnt: distance to the closest surface/corner ***/
-        meas_vec(i) = - norm_p.intensity;
+        double error = - norm_p.intensity;
+        HPL += Hsub.transpose() * error;
     }
 }
+#endif
 
 void LaserMapping::RGBpointBodyToWorld(PointType const * const pi, PointType * const po)
 {
@@ -982,6 +1073,11 @@ void LaserMapping::publish_odometry()
     odomAftMapped.pose.pose.orientation.z = geoQuat.z;
     odomAftMapped.pose.pose.orientation.w = geoQuat.w;
     pubOdomAftMapped.publish(odomAftMapped);
+
+    // 输出里程计位姿结果 TUM格式
+    pathout << std::fixed << std::setprecision(6) << LidarMeasures.last_update_time << " " << std::setprecision(9) //
+            << state.pos_end(0) << " " << state.pos_end(1) << " " << state.pos_end(2) << " " //
+            << geoQuat.x << " " << geoQuat.y << " " << geoQuat.z << " " << geoQuat.w << std::endl;
 }
 
 void LaserMapping::publish_visual_world_sub_map()

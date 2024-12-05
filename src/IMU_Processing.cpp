@@ -92,16 +92,13 @@ void ImuProcess::set_acc_bias_cov(const V3D &b_a)
 bool ImuProcess::detectZeroVelocity(const MeasureGroup &meas)
 {
   int N = init_iter_num;
+  // int N = 1;
   Vector3d cur_acc, cur_gyr;
   for (const auto &it : meas.imu){
     auto &imu_acc = it->linear_acceleration;
     auto &imu_gyr = it->angular_velocity;
     cur_acc << imu_acc.x, imu_acc.y, imu_acc.z;
     cur_gyr << imu_gyr.x, imu_gyr.y, imu_gyr.z;
-
-    ofstream fout(DEBUG_FILE_DIR("imu_out.txt"),ios::app);
-    fout << cur_acc.transpose() << " " << cur_gyr.transpose() << endl;
-    fout.close();
 
     if(N == 1){ // 首帧
       mean_acc = cur_acc;
@@ -115,6 +112,26 @@ bool ImuProcess::detectZeroVelocity(const MeasureGroup &meas)
     N ++;
   }
   init_iter_num = N;
+
+  // double acc_tmp = 0.0, w_tmp = 0.0;
+  // for (const auto &it : meas.imu){
+  //   auto &imu_acc = it->linear_acceleration;
+  //   auto &imu_gyr = it->angular_velocity;
+  //   cur_acc << imu_acc.x, imu_acc.y, imu_acc.z;
+  //   cur_gyr << imu_gyr.x, imu_gyr.y, imu_gyr.z;
+
+  //   acc_tmp += (cur_acc - mean_acc).transpose() * (cur_acc - mean_acc);
+  //   w_tmp += cur_gyr.transpose() * cur_gyr;
+  // }
+  // double glrt = (acc_tmp) / N;
+
+  // if(1){
+  //   std::fstream fout(DEBUG_FILE_DIR("detectZero.txt"), std::ios::app);
+  //   fout << N << endl;
+  //   fout << std::fixed << std::setprecision(3) << "average value: " << abs(mean_acc.norm()-G_m_s2) << " " << abs(mean_gyr.norm()) << endl;
+  //   fout << std::fixed << std::setprecision(3) << "cov value: " << cov_acc.transpose() << " " << cov_gyr.transpose() << endl;
+  //   fout << std::fixed << std::setprecision(3) << "GLRT: " << glrt << endl;
+  // }
 
   // 使用比力和角速度的摸进行零速检测 检测阈值与数据类型相关？如何自适应检测
   if((abs(mean_acc.norm()-G_m_s2) < 0.1) && (abs(mean_gyr.norm()) < 0.1))
@@ -147,9 +164,9 @@ void ImuProcess::IMU_init(const MeasureGroup &meas, StatesGroup &state_inout, in
 
   if(is_zero_velocity)
   {
-    Vector3d gdir = Vector3d(0, 0, -1.0);
-    double scale = mean_acc.z() > 0 ? -1 : 1;     // 判断目前imu时什么方向
-    state_inout.gravity = scale * gdir * G_m_s2;  // UndistortPcl
+    Vector3d gdir = Vector3d(0, 0, 1.0);  // imu朝向右前上
+    // if(mean_acc.z() < 0) gdir *= -1.0;    // mini的imu朝向非常奇怪 下？？
+    state_inout.gravity = -1.0 * gdir * G_m_s2;  // UndistortPcl
 
     // 首帧调整为水平方向，todo：杆臂也得调整
     Vector3d diracc = mean_acc / mean_acc.norm();
@@ -216,7 +233,7 @@ void ImuProcess::Forward(const MeasureGroup &meas, StatesGroup &state_inout, dou
     // #endif
 
     angvel_avr -= state_inout.bias_g;
-    acc_avr     = acc_avr * G_m_s2 / mean_acc.norm() - state_inout.bias_a;
+    acc_avr     = acc_avr * G_m_s2 / mean_acc.norm() - state_inout.bias_a;  // 比力
 
     if(head->header.stamp.toSec() < last_lidar_end_time_)
     {
@@ -253,7 +270,7 @@ void ImuProcess::Forward(const MeasureGroup &meas, StatesGroup &state_inout, dou
     /* propogation of IMU attitude */
     R_imu = R_imu * Exp_f;
 
-    /* Specific acceleration (global frame) of IMU */
+    /* Specific acceleration (global frame) of IMU a=f+g 比力(global系下正)+重力(global系下-9.81) */
     acc_imu = R_imu * acc_avr + state_inout.gravity;
 
     /* propogation of IMU */

@@ -118,7 +118,7 @@ double res_mean_last = 0.05;
 double gyr_cov_scale = 0, acc_cov_scale = 0;
 //double last_timestamp_lidar,  当前接收到的最新imu数据的时间戳;
 double last_timestamp_lidar = 0, last_timestamp_imu = -1.0, last_timestamp_img = -1.0;
-//double filter_size_corner_min, filter_size_surf_min, filter_size_map_min, fov_deg;
+//double filter_size_corner_min, filter_size_surf_min, filter_size_map_min代表voxel的边长, fov_deg;
 double filter_size_corner_min = 0, filter_size_surf_min = 0, filter_size_map_min = 0, fov_deg = 0;
 //double cube_len, HALF_FOV_COS, total_distance, lidar_end_time, first_lidar_time = 0.0;
 double cube_len = 0, total_distance = 0, lidar_end_time = 0, first_lidar_time = 0.0;

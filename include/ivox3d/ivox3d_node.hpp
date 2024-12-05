@@ -119,7 +119,7 @@ struct IVoxNode<PointT, dim>::DistPoint {
 
 template <typename PointT, int dim>
 void IVoxNode<PointT, dim>::InsertPoint(const PointT& pt) {
-    points_.template emplace_back(pt);
+    points_.template emplace_back(pt);      // template用于指示编译器考虑模板参数
 }
 
 template <typename PointT, int dim>

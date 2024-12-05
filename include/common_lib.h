@@ -95,6 +95,18 @@ template <typename PointT>
 inline float calc_range(PointT& p){
     return std::sqrt(p.x*p.x + p.y*p.y + p.z*p.z);
 }
+
+inline Eigen::Matrix3d skewd(const Eigen::Vector3d& x) {
+  Eigen::Matrix3d skew = Eigen::Matrix3d::Zero();
+  skew(0, 1) = -x[2];
+  skew(0, 2) = x[1];
+  skew(1, 0) = x[2];
+  skew(1, 2) = -x[0];
+  skew(2, 0) = -x[1];
+  skew(2, 1) = x[0];
+
+  return skew;
+}
 }
 
 

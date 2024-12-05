@@ -37,6 +37,7 @@
 #include <cv_bridge/cv_bridge.h>
 #include "GNSS_Processing.h"
 #include "ivox3d/ivox3d.h"
+#include <pcl/kdtree/kdtree_flann.h>
 #ifdef USE_ikdtree
 #include "ikd-Tree/ikd_Tree.h"
 #endif
@@ -51,7 +52,7 @@ public:
     using IVoxType = faster_lio::IVox<3, faster_lio::IVoxNodeType::DEFAULT, PointType>;
 
     LaserMapping();
-    ~LaserMapping(){};
+    ~LaserMapping(){ pathout.close(); };
 
     bool InitROS(ros::NodeHandle &nh);
 
@@ -65,7 +66,7 @@ private:
     
     bool sync_packages(LidarMeasureGroup &meas);
 
-    void h_share_model(MatrixXd &Hsub, VectorXd &meas_vec);
+    void h_share_model(MatrixXd &HPH, VectorXd &HPL);
 
     void map_incremental();
 
@@ -192,5 +193,7 @@ private:
     StatesGroup state_propagat;                 // 上一次优化后的状态量
 
     bool nearest_search_en;                     // 判断是否要进行最近临点搜索
+
+    ofstream pathout;
 };
 #endif

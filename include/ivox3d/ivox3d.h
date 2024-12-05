@@ -99,9 +99,9 @@ class IVox {
 
     Options options_;
     std::unordered_map<KeyType, typename std::list<std::pair<KeyType, NodeType>>::iterator, hash_vec<dim>>
-        grids_map_;                                        // voxel hash map KeyType为键3*1维矩阵；值为list迭代器；hash_vec<dim>为自定义的哈希函数
-    std::list<std::pair<KeyType, NodeType>> grids_cache_;  // voxel cache
-    std::vector<KeyType> nearby_grids_;                    // nearbys
+        grids_map_;                                        // voxel hash map KeyType为键3*1维voxel索引值；值为list迭代器；hash_vec<dim>为自定义的哈希函数
+    std::list<std::pair<KeyType, NodeType>> grids_cache_;  // voxel cache 将索引和voxl节点关联，并按访问时间排序，最近被访问的在最前方
+    std::vector<KeyType> nearby_grids_;                    // nearbys index
 };
 
 template <int dim, IVoxNodeType node_type, typename PointType>
@@ -259,7 +259,7 @@ void IVox<dim, node_type, PointType>::AddPoints(const PointVector& points_to_add
         auto key = Pos2Grid(ToEigen<float, dim>(pt));
 
         auto iter = grids_map_.find(key);
-        if (iter == grids_map_.end()) {
+        if (iter == grids_map_.end()) {     // 对应位置没有voxel
             PointType center;
             center.getVector3fMap() = key.template cast<float>() * options_.resolution_;
 
@@ -268,13 +268,13 @@ void IVox<dim, node_type, PointType>::AddPoints(const PointVector& points_to_add
 
             grids_cache_.front().second.InsertPoint(pt);
 
-            if (grids_map_.size() >= options_.capacity_) {
-                grids_map_.erase(grids_cache_.back().first);
+            if (grids_map_.size() >= options_.capacity_) {  // 如果voxel数量超过容量
+                grids_map_.erase(grids_cache_.back().first);    // 删除最长时间未被访问的voxel
                 grids_cache_.pop_back();
             }
         } else {
             iter->second->second.InsertPoint(pt);
-            grids_cache_.splice(grids_cache_.begin(), grids_cache_, iter->second);
+            grids_cache_.splice(grids_cache_.begin(), grids_cache_, iter->second);  // 将对应值移动到list开始，不会导致链表失效
             grids_map_[key] = grids_cache_.begin();
         }
     });
@@ -282,7 +282,7 @@ void IVox<dim, node_type, PointType>::AddPoints(const PointVector& points_to_add
 
 template <int dim, IVoxNodeType node_type, typename PointType>
 Eigen::Matrix<int, dim, 1> IVox<dim, node_type, PointType>::Pos2Grid(const IVox::PtType& pt) const {
-    return (pt * options_.inv_resolution_).array().round().template cast<int>();
+    return (pt * options_.inv_resolution_).array().round().template cast<int>();    // .array()转数组.round()对每个值四舍五入.template cast<int>转整数
 }
 
 template <int dim, IVoxNodeType node_type, typename PointType>
@@ -291,7 +291,7 @@ std::vector<float> IVox<dim, node_type, PointType>::StatGridPoints() const {
     int sum = 0, sum_square = 0;
     for (auto& it : grids_cache_) {
         int s = it.second.Size();
-        valid_num += s > 0;
+        valid_num += s > 0;         // 有效voxel数量
         max = s > max ? s : max;
         min = s < min ? s : min;
         sum += s;

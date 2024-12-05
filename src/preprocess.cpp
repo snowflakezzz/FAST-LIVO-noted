@@ -2,7 +2,7 @@
 
 #define RETURN0     0x00
 #define RETURN0AND1 0x10
-#define NORMAL
+// #define NORMAL
 
 cv::Mat normal_img, normal_img_sp;
 
