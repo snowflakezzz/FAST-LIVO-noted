@@ -42,11 +42,14 @@ class IVoxNode {
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
 
     struct DistPoint;
+    M3D cov; int num; // 计算方差的点数
+    PointT mean_p;    // 均值
 
     IVoxNode() = default;
-    IVoxNode(const PointT& center, const float& side_length) {}  /// same with phc
+    IVoxNode(const PointT& center, const float& side_length) { cov.setZero(); num=0;}  /// same with phc
 
     void InsertPoint(const PointT& pt);
+    void InsertPoint(const PointT& pt, const Eigen::Matrix3d &cov_in);
 
     inline bool Empty() const;
 
@@ -120,6 +123,16 @@ struct IVoxNode<PointT, dim>::DistPoint {
 template <typename PointT, int dim>
 void IVoxNode<PointT, dim>::InsertPoint(const PointT& pt) {
     points_.template emplace_back(pt);      // template用于指示编译器考虑模板参数
+}
+
+template <typename PointT, int dim>
+void IVoxNode<PointT, dim>::InsertPoint(const PointT& pt, const Eigen::Matrix3d &cov_in) {
+    // points_.template emplace_back(pt);      // template用于指示编译器考虑模板参数
+    num++;
+    cov += (cov_in - cov)/num;
+    mean_p.x += (pt.x - mean_p.x)/num;
+    mean_p.y += (pt.y - mean_p.y)/num;
+    mean_p.z += (pt.z - mean_p.z)/num;
 }
 
 template <typename PointT, int dim>

@@ -358,7 +358,7 @@ void LidarSelector::addFromSparseMap(cv::Mat img, PointCloudXYZI::Ptr pg)
     pg_down->reserve(feat_map.size());
     downSizeFilter.setInputCloud(pg);
     downSizeFilter.filter(*pg_down);
-    std::cout << " pg_down size: " << pg_down->points.size() <<std::endl;
+    std::cout << "pg size: " << pg->points.size() << " pg_down size: " << pg_down->points.size() <<std::endl;
     
     reset_grid();
     memset(map_value, 0, sizeof(float)*length);

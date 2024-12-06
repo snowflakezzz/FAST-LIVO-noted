@@ -42,6 +42,7 @@ class IVox {
     using NodeType = typename IVoxNodeTypeTraits<node_type, PointType, dim>::NodeType;
     using PointVector = std::vector<PointType, Eigen::aligned_allocator<PointType>>;
     using DistPoint = typename NodeType::DistPoint;
+    using CovVector = std::vector<Eigen::Matrix3d, Eigen::aligned_allocator<Eigen::Matrix3d>>;
 
     enum class NearbyType {
         CENTER,  // center only
@@ -72,6 +73,8 @@ class IVox {
      */
     void AddPoints(const PointVector& points_to_add);
 
+    void AddPoints(const PointVector& points_to_add, const CovVector& point_covs);
+
     /// get nn
     bool GetClosestPoint(const PointType& pt, PointType& closest_pt);
 
@@ -80,6 +83,9 @@ class IVox {
 
     /// get nn in cloud
     bool GetClosestPoint(const PointVector& cloud, PointVector& closest_cloud);
+
+    /// get nn in cloud
+    bool GetClosestCov(const PointType& pt, Eigen::Vector3d& closest_pt, Eigen::Matrix3d cov_pt, int num);
 
     /// get number of points
     size_t NumPoints() const;
@@ -127,6 +133,26 @@ bool IVox<dim, node_type, PointType>::GetClosestPoint(const PointType& pt, Point
     auto iter = std::min_element(candidates.begin(), candidates.end());
     closest_pt = iter->Get();
     return true;
+}
+
+template <int dim, IVoxNodeType node_type, typename PointType>
+bool IVox<dim, node_type, PointType>::GetClosestCov(const PointType& pt, Eigen::Vector3d& closest_pt, Eigen::Matrix3d cov_pt, int num){
+    auto key = Pos2Grid(ToEigen<float, dim>(pt));
+    double distance;
+    auto iter = grids_map_.find(key);
+    // 找men_p最近的作为计算配对点
+
+    if (iter != grids_map_.end()) {
+        auto p = iter->second->second.mean_p;
+        closest_pt[0] = p.x;
+        closest_pt[1] = p.y;
+        closest_pt[2] = p.z;
+        cov_pt = iter->second->second.cov;
+        num = iter->second->second.num;
+        return true;
+    } else {
+        return false;
+    }
 }
 
 template <int dim, IVoxNodeType node_type, typename PointType>
@@ -278,6 +304,36 @@ void IVox<dim, node_type, PointType>::AddPoints(const PointVector& points_to_add
             grids_map_[key] = grids_cache_.begin();
         }
     });
+}
+
+template <int dim, IVoxNodeType node_type, typename PointType>
+void IVox<dim, node_type, PointType>::AddPoints(const PointVector& points_to_add, const CovVector& point_covs) {
+
+    for(int i=0; i<points_to_add.size(); i++){
+        auto& pt = points_to_add[i];
+        Matrix3d pcov = point_covs[i];
+        auto key = Pos2Grid(ToEigen<float, dim>(pt));
+
+        auto iter = grids_map_.find(key);
+        if (iter == grids_map_.end()) {     // 对应位置没有voxel
+            PointType center;
+            center.getVector3fMap() = key.template cast<float>() * options_.resolution_;
+
+            grids_cache_.push_front({key, NodeType(center, options_.resolution_)});
+            grids_map_.insert({key, grids_cache_.begin()});
+
+            grids_cache_.front().second.InsertPoint(pt, pcov);
+
+            if (grids_map_.size() >= options_.capacity_) {  // 如果voxel数量超过容量
+                grids_map_.erase(grids_cache_.back().first);    // 删除最长时间未被访问的voxel
+                grids_cache_.pop_back();
+            }
+        } else {
+            iter->second->second.InsertPoint(pt, pcov);
+            grids_cache_.splice(grids_cache_.begin(), grids_cache_, iter->second);  // 将对应值移动到list开始，不会导致链表失效
+            grids_map_[key] = grids_cache_.begin();
+        }
+    }
 }
 
 template <int dim, IVoxNodeType node_type, typename PointType>

@@ -56,6 +56,7 @@ typedef Matrix3d M3D;
 typedef Vector3f V3F;
 typedef Matrix3f M3F;
 typedef std::vector<float> FloatArray;
+typedef std::vector<Eigen::Matrix3d, Eigen::aligned_allocator<Eigen::Matrix3d>> M3DVector;
 
 #define MD(a,b)  Matrix<double, (a), (b)>
 #define VD(a)    Matrix<double, (a), 1>

@@ -63,7 +63,7 @@ public:
     // ros::NodeHandler m_nh;
 private:
     void readParameters(ros::NodeHandle &nh);
-    void caculate_covariance(PointCloudXYZI::Ptr &cloud_in, vector<M3D> covariances);
+    void caculate_covariance(PointCloudXYZI::Ptr &cloud_in, M3DVector &covariances);
     
     bool sync_packages(LidarMeasureGroup &meas);
 
@@ -194,7 +194,7 @@ private:
     StatesGroup state_propagat;                 // 上一次优化后的状态量
 
     bool nearest_search_en;                     // 判断是否要进行最近临点搜索
-
+    M3DVector input_cov;                        // 存储点的协方差矩阵
     ofstream pathout;
 };
 #endif
