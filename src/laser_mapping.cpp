@@ -134,16 +134,18 @@ void LaserMapping::Run(){
     int featsFromMapNum = ikdtree.size();
     #else
     if (flg_first_scan){
-        // if(feats_down_body->points.size() > 5) {
+        if(feats_down_body->points.size() > 5) {
             ivox_->AddPoints(feats_down_body->points);
             flg_first_scan = false;
-        // }
+            pcl::io::savePCDFileBinary(DEBUG_FILE_DIR("map.pcd"), *feats_down_body);
+        }
         return;
     }
     #endif
 
     feats_down_size = feats_down_body->points.size();
     cout<<"[ LIO ]: Raw feature num: "<<feats_undistort->points.size()<<" downsamp num "<<feats_down_size<< endl;//<<" Map num: "<<featsFromMapNum<< "." << endl;
+    pcl::io::savePCDFileBinary(DEBUG_FILE_DIR("input.pcd"), *feats_undistort);
 
     feats_down_world->resize(feats_down_size);
 
@@ -380,16 +382,52 @@ void LaserMapping::map_incremental()
 }
 
 #ifdef USE_VGICP
+void LaserMapping::caculate_covariance(PointCloudXYZI::Ptr &cloud_in, vector<M3D> covariances){
+    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ> ());
+    pcl::copyPointCloud(*cloud_in, *cloud);
+
+    pcl::KdTreeFLANN<pcl::PointXYZ> kdtree;
+    kdtree.setInputCloud(cloud);
+
+    covariances.resize(cloud->size());
+
+    ofstream fout(DEBUG_FILE_DIR("point_test.txt"), std::ios::app);
+
+    for (int i = 0; i < cloud->size(); i++) {
+        std::vector<int> k_indices;         // 存储最近邻点
+        std::vector<float> k_sq_distances;  // 最近邻点到查询点的距离平方
+        kdtree.nearestKSearch(cloud->at(i), 15, k_indices, k_sq_distances);
+
+        fout << "points: " << cloud->at(i) << " as: " << endl;
+
+        Eigen::Matrix<double, 4, -1> neighbors(4, 15);
+        for (int j = 0; j < k_indices.size(); j++) {
+            neighbors.col(j) = cloud->at(k_indices[j]).getVector4fMap().cast<double>();
+            fout << neighbors.col(j).transpose() << endl;
+        }
+
+        neighbors.colwise() -= neighbors.rowwise().mean().eval(); // .rowwise().mean()计算每行均值.eval()将计算结果转换为与 neighbors 矩阵相同大小的矩阵
+        Eigen::Matrix4d cov = neighbors * neighbors.transpose() / 15; // 4*4
+        covariances[i] = cov.block<3, 3>(0, 0);
+        fout << "cov: " << endl << cov << endl;
+    }
+    fout.close();
+}
+
 // VGICP构建观测方程
 void LaserMapping::h_share_model(MatrixXd &HPH, VectorXd &HPL)
 {
-    std::shared_ptr<IVoxType> ivox_input = std::make_shared<IVoxType>(ivox_options_);
-    ivox_input->AddPoints(feats_undistort->points);     // 利用未稀疏化的点来计算点的方差
+    // std::shared_ptr<IVoxType> ivox_input = std::make_shared<IVoxType>(ivox_options_);
+    // ivox_input->AddPoints(feats_down_body->points);     // 利用未稀疏化的点来计算点的方差
 
-    HPH.resize(6,6);
-    HPL.resize(6);
+    // pcl::io::savePCDFileBinary(DEBUG_FILE_DIR("input.pcd"), *feats_undistort);
+    vector<M3D> input_cov;
+    caculate_covariance(feats_down_body, input_cov);
 
-    int k_corre = 5;    // 用于计算方差的最近邻点个数
+    HPH.resize(6,6); HPH.setZero();
+    HPL.resize(6); HPL.setZero();
+
+    int k_corre = 15;    // 用于计算方差的最近邻点个数
     for(int i=0; i<feats_down_size; i++){
         // step1 计算点云的世界坐标
         PointType &point_body  = feats_down_body->points[i];
@@ -407,53 +445,68 @@ void LaserMapping::h_share_model(MatrixXd &HPH, VectorXd &HPL)
             kdtree_search_counter ++;                        
         }
         if (points_near.size() < NUM_MATCH_POINTS) continue;
+        int points_num = points_near.size();
 
         // step3 计算最近邻点的方差
         M3D cov_B = M3D::Zero();   V3D mean_B = V3D::Zero();
-        int valid_num = 0;
-        for(int idx=0; idx<NUM_MATCH_POINTS; ++idx){
-            PointVector point_near_near(k_corre);
-            ivox_->GetClosestPoint(points_near[idx], point_near_near, k_corre);
-            if(point_near_near.size() < k_corre) continue;
+        mean_B = V3D(points_near[0].x, points_near[0].y, points_near[0].z);
+        PointVector point_near_near(k_corre);
+        ivox_->GetClosestPoint(points_near[0], point_near_near, k_corre);
 
-            Eigen::Matrix<double, 3, -1> neighbors(3, k_corre);
-            for(int j=0; j<k_corre; ++j){
-                neighbors.col(j) = V3D(point_near_near[j].x, point_near_near[j].y, point_near_near[j].z);
-            }
-            neighbors.colwise() -= neighbors.rowwise().mean().eval();
-            Matrix3d cov = neighbors * neighbors.transpose() / k_corre;
-            cov_B += cov;
-            mean_B += V3D(points_near[idx].x, points_near[idx].y, points_near[idx].z);
-            valid_num++;
-        }
-        mean_B /= valid_num;
-        cov_B /= valid_num;
-
-        // step4 计算方差
-        PointVector near_points;
-        ivox_input->GetClosestPoint(point_body, near_points, k_corre);
-
-        int neighbor_num = near_points.size();
+        int neighbor_num = point_near_near.size();
         Eigen::Matrix<double, 3, -1> neighbors(3, neighbor_num);
         for(int j=0; j<neighbor_num; ++j){
-            neighbors.col(j) = V3D(near_points[j].x, near_points[j].y, near_points[j].z);
+            neighbors.col(j) = V3D(point_near_near[j].x, point_near_near[j].y, point_near_near[j].z);
         }
         neighbors.colwise() -= neighbors.rowwise().mean().eval();
-        M3D cov_A = neighbors * neighbors.transpose() / neighbor_num;
+        cov_B = neighbors * neighbors.transpose() / neighbor_num;
+
+        // step4 计算方差
+        ofstream fout(DEBUG_FILE_DIR("point.txt"), std::ios::app);
+        fout << "points: " << point_body << " as: " << endl;
+
+        PointVector near_points;
+        ivox_input->GetClosestPoint(point_body, near_points, k_corre, 10);
+
+        neighbor_num = near_points.size();
+        if(neighbor_num<=1) continue;
+        neighbors.resize(3, neighbor_num); neighbors.setZero();
+        for(int j=0; j<neighbor_num; ++j){
+            neighbors.col(j) = V3D(near_points[j].x, near_points[j].y, near_points[j].z);
+            fout << neighbors.col(j).transpose() << endl;
+        }
+        M3D cov_A = input_cov[i];
+
+        fout.close();
 
         // step5 残差计算
         M3D rotation = state.rot_end * Lidar_rot_to_IMU;
-        M3D maha = cov_B + rotation*cov_A*rotation.transpose();
-        M3D mahalanobis = maha.inverse();
+        M3D RCR = cov_B + rotation*cov_A*rotation.transpose();
+        M3D mahalanobis = RCR.inverse();
+
         V3D error = mean_B - p_word;
         Eigen::Matrix<double, 3, 6> dedx = Eigen::Matrix<double, 3, 6>::Zero();
         dedx.block<3, 3>(0, 0) = common::skewd(p_word);
         dedx.block<3, 3>(0, 3) = -Eigen::Matrix3d::Identity();
 
-        // double w = std::sqrt(NUM_MATCH_POINTS);
-        double w = 1.0;
+        // ofstream fout(DEBUG_FILE_DIR("test.txt"), std::ios::app);
+        // fout << "mean_B:" << endl << mean_B.transpose() << endl;
+        // fout << "cov_B" << endl << cov_B << endl;
+        // fout << "A:" << endl << p_word.transpose() << endl;
+        // fout << "cov_A" << endl << cov_A << endl;
+        // fout.close();
+
+        double w = std::sqrt(points_num);
+        // double w = 1.0;
         Matrix<double, 6, 6> Hi = w * dedx.transpose() * mahalanobis * dedx;
         Matrix<double, 6, 1> bi = w * dedx.transpose() * mahalanobis * error;
+
+        // ofstream fout(DEBUG_FILE_DIR("P.txt"), std::ios::app);
+        // fout << "RCR" << endl << RCR << endl;
+        // fout << "mahalanobis" << endl << mahalanobis << endl;
+        // fout << "dedx" << endl << dedx << endl;
+        // fout << "error" << endl << error.transpose() << endl;
+        // fout.close();
 
         HPH += Hi;
         HPL += bi;

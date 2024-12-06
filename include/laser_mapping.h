@@ -63,6 +63,7 @@ public:
     // ros::NodeHandler m_nh;
 private:
     void readParameters(ros::NodeHandle &nh);
+    void caculate_covariance(PointCloudXYZI::Ptr &cloud_in, vector<M3D> covariances);
     
     bool sync_packages(LidarMeasureGroup &meas);
 
