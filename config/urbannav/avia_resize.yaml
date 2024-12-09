@@ -15,8 +15,10 @@ ncc_thre: 0
 img_point_cov : 100 # 1000
 laser_point_cov : 0.001 # 0.001
 delta_time: 0.0         # camera与lidar时偏 =lidar时间 - camera时间
+
 gnss:
     gnss_en: 1           # 是否使用gnss观测
+    extrinsic: [0,0,0]
 
 common:
     lid_topic:  "/velodyne_points"
@@ -40,9 +42,6 @@ mapping:
     extrinsic_R: [ 1, 0, 0,
                    0, 1, 0,
                    0, 0, 1]
-
-gnss:
-    extrinsic: [0,0,0]
 
 pcd_save:
     pcd_save_en: true

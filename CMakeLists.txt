@@ -10,7 +10,7 @@ set( CMAKE_CXX_FLAGS "-std=c++14 -O3" )
 add_definitions(-DROOT_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/\")
 
 add_definitions(-w)
-add_definitions(-DUSE_VGICP)
+# add_definitions(-DUSE_VGICP)
 # add_definitions(-DUSE_IKFOM)
 # add_definitions(-DUSE_ikdtree)
 # add_definitions(-DDEBUG_PRINT)

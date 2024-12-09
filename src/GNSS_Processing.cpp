@@ -32,10 +32,10 @@ GNSSProcessing::~GNSSProcessing(){
 
 void GNSSProcessing::input_gnss(const sensor_msgs::NavSatFix::ConstPtr& msg_in)
 {
-    if(msg_in->status.status < 0) return;  // 不使用非固定解
+    // if(msg_in->status.status < 0) return;  // 不使用非固定解
 
     if(!is_origin_set){
-        anchor_ = Vector3d(msg_in->latitude, msg_in->longitude, msg_in->altitude);
+        anchor_ = Vector3d(msg_in->latitude, msg_in->longitude, msg_in->altitude);      // deg
         anchor_ = D2R * anchor_;
         // G_m_s2  = earth::gravity(anchor_);
         is_origin_set = true;
@@ -43,7 +43,6 @@ void GNSSProcessing::input_gnss(const sensor_msgs::NavSatFix::ConstPtr& msg_in)
 
     GNSS gnss;
     gnss.time = msg_in->header.stamp.toSec();
-    // gnss.time -= 18; gpst和utc的差异
     gnss.blh  = Earth::global2local(anchor_, D2R * Vector3d(msg_in->latitude, msg_in->longitude, msg_in->altitude));
     gnss.std  = Vector3d(msg_in->position_covariance[0], msg_in->position_covariance[4], msg_in->position_covariance[8]);
 
@@ -133,14 +132,9 @@ void GNSSProcessing::input_path(const double &cur_time, const Eigen::Vector3d &p
         GNSS gnss_msg = gnss_queue_.front();
         double gnss_t = gnss_msg.time;
 
-        if(last_gnss_time_!=-1 && common::calc_dist(gnss_msg.blh, last_gnss_.blh) < 5){
-            gnss_queue_.pop();
-            continue;
-        }
-
         if(gnss_t < time)
             gnss_queue_.pop();
-        else if(gnss_t <= time+0.1){
+        else if(gnss_t <= time+0.05){
             new_gnss_ = true;
             break;
         }
@@ -155,18 +149,33 @@ void GNSSProcessing::addIMUpos(const vector<Pose6D> &IMUpose, const double pcl_b
         odo_mutex_.lock();
         gnss_mutex_.lock();
         GNSS gnss_msg = gnss_queue_.front();
+        gnss_queue_.pop();
         double gnss_t = gnss_msg.time;
+
+        // 如果两次gnss观测距离较近，就不使用本次gnss观测
+        if(last_gnss_time_!=-1 && common::calc_dist(gnss_msg.blh, last_gnss_.blh) < 5){
+            new_gnss_ = false;
+            gnss_mutex_.unlock();
+            odo_mutex_.unlock();
+            return;
+        }
+        if(last_gnss_time_!=-1){
+            ofstream fout(DEBUG_FILE_DIR("time.txt"),ios::app);
+            fout << fixed << setprecision(3) << "blh: " << gnss_msg.blh.transpose() << "; " << last_gnss_.blh.transpose() << "; " << common::calc_dist(gnss_msg.blh, last_gnss_.blh) << endl;
+            fout.close();
+        }
 
         for(auto item : IMUpose){
             double time = pcl_beg_time + item.offset_time;
-            if(gnss_t >= time-0.01 && gnss_t <= time+0.01){
+
+            if(gnss_t >= time-0.01 && gnss_t <= time+0.01){     // 阈值依据imu频率设定
                 // 去除gnss飞点
                 Eigen::Vector3d odo_pos(VEC_FROM_ARRAY(item.pos));
                 if(is_has_yaw_){
                     Eigen::Vector3d gnss_pos = common::gnss_trans(gnss_msg.blh, yaw_);
                     if(common::calc_dist(odo_pos, gnss_pos)>3){
                         ofstream fout(DEBUG_FILE_DIR("delta.txt"),ios::app);
-                        fout << fixed << setprecision(3) << common::calc_dist(odo_pos, gnss_pos) << endl;
+                        fout << fixed << setprecision(3) << odo_pos.transpose() << "; " << gnss_pos.transpose() << "; " << common::calc_dist(odo_pos, gnss_pos) << endl;
                         fout.close();
                         break;
                     }

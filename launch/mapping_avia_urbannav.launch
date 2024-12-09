@@ -2,10 +2,10 @@
 
 	<arg name="rviz" default="true" />
 
-	<rosparam command="load" file="$(find fast_livo)/config/urbannav_mediu/avia_resize.yaml" />
+	<rosparam command="load" file="$(find fast_livo)/config/urbannav/avia_resize.yaml" />
 
 	<node pkg="fast_livo" type="fastlivo_mapping" name="laserMapping" output="screen" >
-		<rosparam file="$(find fast_livo)/config/urbannav_mediu/camera.yaml" />
+		<rosparam file="$(find fast_livo)/config/urbannav/camera.yaml" />
 	</node>
 	
 	<group if="$(arg rviz)">

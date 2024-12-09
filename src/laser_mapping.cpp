@@ -51,8 +51,6 @@ void LaserMapping::Run(){
     // step2 imu初始化，点云去畸变到雷达扫描结束或图像帧处
     p_imu->Process2(LidarMeasures, state, feats_undistort); 
     state_propagat = state;
-    if(bgnss_en) 
-        p_gnss->addIMUpos(p_imu->IMUpose, MAX(LidarMeasures.lidar_beg_time, LidarMeasures.last_update_time));
 
     if (lidar_selector->debug) LidarMeasures.debug_show();
 
@@ -74,6 +72,9 @@ void LaserMapping::Run(){
     fast_lio_is_ready = true;
     flg_EKF_inited = (LidarMeasures.lidar_beg_time - first_lidar_time) < INIT_TIME ? \
                     false : true;
+
+    if(bgnss_en)
+        p_gnss->addIMUpos(p_imu->IMUpose, p_imu->start_timestamp_);
     
     // step3 处理视觉观测信息，在lidar_selector中进行视觉追踪、位姿优化
     if (!LidarMeasures.is_lidar_end) 
@@ -391,36 +392,25 @@ void LaserMapping::caculate_covariance(PointCloudXYZI::Ptr &cloud_in, vector<M3D
 
     covariances.resize(cloud->size());
 
-    ofstream fout(DEBUG_FILE_DIR("point_test.txt"), std::ios::app);
-
     for (int i = 0; i < cloud->size(); i++) {
         std::vector<int> k_indices;         // 存储最近邻点
         std::vector<float> k_sq_distances;  // 最近邻点到查询点的距离平方
         kdtree.nearestKSearch(cloud->at(i), 15, k_indices, k_sq_distances);
 
-        fout << "points: " << cloud->at(i) << " as: " << endl;
-
         Eigen::Matrix<double, 4, -1> neighbors(4, 15);
         for (int j = 0; j < k_indices.size(); j++) {
             neighbors.col(j) = cloud->at(k_indices[j]).getVector4fMap().cast<double>();
-            fout << neighbors.col(j).transpose() << endl;
         }
 
         neighbors.colwise() -= neighbors.rowwise().mean().eval(); // .rowwise().mean()计算每行均值.eval()将计算结果转换为与 neighbors 矩阵相同大小的矩阵
         Eigen::Matrix4d cov = neighbors * neighbors.transpose() / 15; // 4*4
         covariances[i] = cov.block<3, 3>(0, 0);
-        fout << "cov: " << endl << cov << endl;
     }
-    fout.close();
 }
 
 // VGICP构建观测方程
 void LaserMapping::h_share_model(MatrixXd &HPH, VectorXd &HPL)
 {
-    // std::shared_ptr<IVoxType> ivox_input = std::make_shared<IVoxType>(ivox_options_);
-    // ivox_input->AddPoints(feats_down_body->points);     // 利用未稀疏化的点来计算点的方差
-
-    // pcl::io::savePCDFileBinary(DEBUG_FILE_DIR("input.pcd"), *feats_undistort);
     vector<M3D> input_cov;
     caculate_covariance(feats_down_body, input_cov);
 
@@ -462,22 +452,7 @@ void LaserMapping::h_share_model(MatrixXd &HPH, VectorXd &HPL)
         cov_B = neighbors * neighbors.transpose() / neighbor_num;
 
         // step4 计算方差
-        ofstream fout(DEBUG_FILE_DIR("point.txt"), std::ios::app);
-        fout << "points: " << point_body << " as: " << endl;
-
-        PointVector near_points;
-        ivox_input->GetClosestPoint(point_body, near_points, k_corre, 10);
-
-        neighbor_num = near_points.size();
-        if(neighbor_num<=1) continue;
-        neighbors.resize(3, neighbor_num); neighbors.setZero();
-        for(int j=0; j<neighbor_num; ++j){
-            neighbors.col(j) = V3D(near_points[j].x, near_points[j].y, near_points[j].z);
-            fout << neighbors.col(j).transpose() << endl;
-        }
         M3D cov_A = input_cov[i];
-
-        fout.close();
 
         // step5 残差计算
         M3D rotation = state.rot_end * Lidar_rot_to_IMU;
@@ -489,24 +464,10 @@ void LaserMapping::h_share_model(MatrixXd &HPH, VectorXd &HPL)
         dedx.block<3, 3>(0, 0) = common::skewd(p_word);
         dedx.block<3, 3>(0, 3) = -Eigen::Matrix3d::Identity();
 
-        // ofstream fout(DEBUG_FILE_DIR("test.txt"), std::ios::app);
-        // fout << "mean_B:" << endl << mean_B.transpose() << endl;
-        // fout << "cov_B" << endl << cov_B << endl;
-        // fout << "A:" << endl << p_word.transpose() << endl;
-        // fout << "cov_A" << endl << cov_A << endl;
-        // fout.close();
-
         double w = std::sqrt(points_num);
         // double w = 1.0;
         Matrix<double, 6, 6> Hi = w * dedx.transpose() * mahalanobis * dedx;
         Matrix<double, 6, 1> bi = w * dedx.transpose() * mahalanobis * error;
-
-        // ofstream fout(DEBUG_FILE_DIR("P.txt"), std::ios::app);
-        // fout << "RCR" << endl << RCR << endl;
-        // fout << "mahalanobis" << endl << mahalanobis << endl;
-        // fout << "dedx" << endl << dedx << endl;
-        // fout << "error" << endl << error.transpose() << endl;
-        // fout.close();
 
         HPH += Hi;
         HPL += bi;

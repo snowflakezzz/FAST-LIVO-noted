@@ -88,7 +88,7 @@ inline float calc_dist(const Eigen::Vector3d &p1, const Eigen::Vector3d &p2) { r
 inline Vector3d gnss_trans(const Eigen::Vector3d &p, const double yaw) {
     Eigen::Matrix3d R_gnss_odo;
     R_gnss_odo << cos(yaw), -sin(yaw), 0, sin(yaw), cos(yaw), 0, 0, 0, 1;
-    return R_gnss_odo.transpose() * p;
+    return R_gnss_odo * p;
 }
 
 template <typename PointT>

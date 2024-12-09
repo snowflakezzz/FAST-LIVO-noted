@@ -54,7 +54,6 @@ class ImuProcess
   void set_acc_cov_scale(const V3D &scaler);
   void set_gyr_bias_cov(const V3D &b_g);
   void set_acc_bias_cov(const V3D &b_a);
-  void Process(const LidarMeasureGroup &lidar_meas, StatesGroup &stat, PointCloudXYZI::Ptr cur_pcl_un_);
   void Process2(LidarMeasureGroup &lidar_meas, StatesGroup &stat, PointCloudXYZI::Ptr cur_pcl_un_);
   void UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_inout, PointCloudXYZI &pcl_out);
 
@@ -72,8 +71,6 @@ class ImuProcess
   // GNSSProcessing::Ptr gnss_handler_;
 
   void IMU_init(const MeasureGroup &meas, StatesGroup &state, int &N);
-  void Forward(const MeasureGroup &meas, StatesGroup &state_inout, double pcl_beg_time, double end_time);
-  void Backward(const LidarMeasureGroup &lidar_meas, StatesGroup &state_inout, PointCloudXYZI &pcl_out);
 
   PointCloudXYZI::Ptr cur_pcl_un_;
   sensor_msgs::ImuConstPtr last_imu_;
@@ -88,8 +85,8 @@ class ImuProcess
   V3D acc_s_last;
   V3D last_acc;
   V3D last_ang;
-  double start_timestamp_;
-  double last_lidar_end_time_;                  // 记录去畸变到哪一时刻的雷达扫描
+  double start_timestamp_;                      // 记录本次扫描开始时刻
+  double last_lidar_end_time_;                  // 记录上一次状态更新到哪个时刻
   int    init_iter_num = 1;
   bool   b_first_frame_ = true;
   bool   imu_need_init_ = true;
