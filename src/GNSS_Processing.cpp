@@ -32,7 +32,7 @@ GNSSProcessing::~GNSSProcessing(){
 
 void GNSSProcessing::input_gnss(const sensor_msgs::NavSatFix::ConstPtr& msg_in)
 {
-    // if(msg_in->status.status < 0) return;  // 不使用非固定解
+    if(msg_in->status.status < 0) return;  // 不使用非固定解
 
     if(!is_origin_set){
         anchor_ = Vector3d(msg_in->latitude, msg_in->longitude, msg_in->altitude);      // deg
@@ -159,11 +159,6 @@ void GNSSProcessing::addIMUpos(const vector<Pose6D> &IMUpose, const double pcl_b
             odo_mutex_.unlock();
             return;
         }
-        if(last_gnss_time_!=-1){
-            ofstream fout(DEBUG_FILE_DIR("time.txt"),ios::app);
-            fout << fixed << setprecision(3) << "blh: " << gnss_msg.blh.transpose() << "; " << last_gnss_.blh.transpose() << "; " << common::calc_dist(gnss_msg.blh, last_gnss_.blh) << endl;
-            fout.close();
-        }
 
         for(auto item : IMUpose){
             double time = pcl_beg_time + item.offset_time;
@@ -171,7 +166,7 @@ void GNSSProcessing::addIMUpos(const vector<Pose6D> &IMUpose, const double pcl_b
             if(gnss_t >= time-0.01 && gnss_t <= time+0.01){     // 阈值依据imu频率设定
                 // 去除gnss飞点
                 Eigen::Vector3d odo_pos(VEC_FROM_ARRAY(item.pos));
-                if(is_has_yaw_){
+                if(0){      //is_has_yaw_
                     Eigen::Vector3d gnss_pos = common::gnss_trans(gnss_msg.blh, yaw_);
                     if(common::calc_dist(odo_pos, gnss_pos)>3){
                         ofstream fout(DEBUG_FILE_DIR("delta.txt"),ios::app);
@@ -257,7 +252,7 @@ void GNSSProcessing::gnssOutlierCullingByChi2(ceres::Problem & problem,
 }
 
 bool GNSSProcessing::optimize(){
-    while(true){
+    while(true){        // 初始化的误差纳入到优化中了
         if(ready_comp_){
             ready_comp_ = false;
 
@@ -305,16 +300,11 @@ bool GNSSProcessing::optimize(){
                     residual_block.push_back(std::make_pair(id, iter_gnss->second));
                     array_index.push_back(i);
                 }
-                i++;
             }
 
             ceres::Solve(options, &problem, &summary);
 
-            ofstream fout(DEBUG_FILE_DIR("after.txt"),ios::app);
-            fout << fixed << setprecision(3) << t_array[0][0] << endl;
-            fout.close();
-            
-            if(0)
+            if(1)
             { // gnss卡方检测并给gnss观测赋予新的权重
                 gnssOutlierCullingByChi2(problem, residual_block);
 
@@ -335,21 +325,23 @@ bool GNSSProcessing::optimize(){
                 // ceres::Covariance::Options options;
                 // ceres::Covariance covariance(options);
 
-                i=0;
-                for(auto iter_odo=odo_path_.begin(); iter_odo != odo_path_.end(); iter_odo++, i++){
-                    iter_odo->second = Vector3d(t_array[i][0], t_array[i][1], t_array[i][2]);
-                }
+                // i=0;
+                // for(auto iter_odo=odo_path_.begin(); iter_odo != odo_path_.end(); iter_odo++, i++){
+                //     iter_odo->second = Vector3d(t_array[i][0], t_array[i][1], t_array[i][2]);
+                // }
 
-                if(gnss_buffer_.size() >= 10){
-                    gnss_buffer_.clear();
+                if(gnss_buffer_.size() >= 100){
+                    // gnss_buffer_.clear();
                     i = 0; std::ofstream outfile;
-                    outfile.open(DEBUG_FILE_DIR("gnss_odo.txt"), std::ios::app);
+                    outfile.open(DEBUG_FILE_DIR("gnss_odo.txt"), std::ios::out);
 
                     for(auto iter_odo = odo_path_.begin(); iter_odo != odo_path_.end(); iter_odo++, i++){
-                        outfile << std::fixed << std::setprecision(6) << setw(20) << iter_odo->first << " " << iter_odo->second.transpose() << endl;
+                        outfile << std::fixed << std::setprecision(6) << iter_odo->first << " " \
+                            << t_array[i][0] << " " << t_array[i][1] << " " << t_array[i][2] \
+                            << " " << 0.0 << " " << 0.0 << " " << 0.0 << " " << 0.0 << endl;
                     }
                     outfile.close();
-                    odo_path_.clear();
+                    // odo_path_.clear();
                 }
             }
 

@@ -24,9 +24,9 @@ public:
 
         error = p + lever_ - common::gnss_trans(gnss_.blh, yaw_);
 
-        ofstream fout(DEBUG_FILE_DIR("residual.txt"), std::ios::app);
-        fout << "gnss factor residual: " << error.transpose() << endl;
-        fout.close();
+        // ofstream fout(DEBUG_FILE_DIR("residual.txt"), std::ios::app);
+        // fout << "gnss factor residual: " << error.transpose() << endl;
+        // fout.close();
 
         Matrix3d sqrt_info_ = Matrix3d::Identity();     // 设定权重
         sqrt_info_(0,0) /= gnss_.std[0];
@@ -67,9 +67,9 @@ public:
 
         error = p2 - p1 - delta_t_;
 
-        ofstream fout(DEBUG_FILE_DIR("residual.txt"), std::ios::app);
-        fout << "odo factor residual: " << error.transpose() << endl;
-        fout.close();
+        // ofstream fout(DEBUG_FILE_DIR("residual.txt"), std::ios::app);
+        // fout << "odo factor residual: " << error.transpose() << endl;
+        // fout.close();
 
         error = error*t_var_;
 
