@@ -109,6 +109,7 @@ void LaserMapping::Run(){
             publish_visual_world_sub_map();
             
             geoQuat = tf::createQuaternionMsgFromRollPitchYaw(euler_cur(0), euler_cur(1), euler_cur(2));
+            publish_frame_body();
             publish_odometry();
             euler_cur = RotMtoEuler(state.rot_end);
 
@@ -239,6 +240,7 @@ void LaserMapping::Run(){
 
     euler_cur = RotMtoEuler(state.rot_end);
     geoQuat = tf::createQuaternionMsgFromRollPitchYaw(euler_cur(0), euler_cur(1), euler_cur(2));
+    publish_frame_body();
     publish_odometry();
     
     if(bgnss_en) p_gnss->input_path(LidarMeasures.last_update_time, state.pos_end);
@@ -383,7 +385,7 @@ void LaserMapping::map_incremental()
 }
 
 #ifdef USE_VGICP
-void LaserMapping::caculate_covariance(PointCloudXYZI::Ptr &cloud_in, vector<M3D> covariances){
+void LaserMapping::caculate_covariance(PointCloudXYZI::Ptr &cloud_in, vector<M3D> &covariances){
     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ> ());
     pcl::copyPointCloud(*cloud_in, *cloud);
 
@@ -741,6 +743,8 @@ bool LaserMapping::InitROS(ros::NodeHandle &nh){
             ("/aft_mapped_to_init", 10);
     pubPath          = nh.advertise<nav_msgs::Path> 
             ("/path", 10);
+    pubLaserCloudFullRes_body = nh.advertise<sensor_msgs::PointCloud2>
+            ("/cloud_registered_body", 100000);
     return true;
 }
 
@@ -1172,4 +1176,15 @@ void LaserMapping::publish_path()
     msg_body_pose.header.frame_id = "camera_init";
     path.poses.push_back(msg_body_pose);
     pubPath.publish(path);
+}
+
+void LaserMapping::publish_frame_body()
+{
+    PointCloudXYZI::Ptr laserCloudFullRes(feats_undistort);
+    sensor_msgs::PointCloud2 laserCloudmsg;
+    pcl::toROSMsg(*feats_undistort, laserCloudmsg);
+    // laserCloudmsg.header.stamp = ros::Time::now();//.fromSec(lidar_end_time);
+    laserCloudmsg.header.stamp = ros::Time().fromSec(lidar_end_time);
+    laserCloudmsg.header.frame_id = "camera_init";
+    pubLaserCloudFullRes_body.publish(laserCloudmsg);
 }

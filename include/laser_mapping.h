@@ -63,7 +63,7 @@ public:
     // ros::NodeHandler m_nh;
 private:
     void readParameters(ros::NodeHandle &nh);
-    void caculate_covariance(PointCloudXYZI::Ptr &cloud_in, vector<M3D> covariances);
+    void caculate_covariance(PointCloudXYZI::Ptr &cloud_in, vector<M3D> &covariances);
     
     bool sync_packages(LidarMeasureGroup &meas);
 
@@ -87,6 +87,7 @@ private:
     void publish_frame_world();
     void publish_effect_world();
     void publish_path();
+    void publish_frame_body();
 
     /// modules
     IVoxType::Options ivox_options_;
@@ -187,6 +188,7 @@ private:
     ros::Publisher pubLaserCloudMap;
     ros::Publisher pubOdomAftMapped;
     ros::Publisher pubPath;
+    ros::Publisher pubLaserCloudFullRes_body;   // for m-detector
     image_transport::Publisher img_pub;
 
     // 滤波优化相关参数

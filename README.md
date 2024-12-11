@@ -1,9 +1,9 @@
 # TO DO
 
-* [ ] add gnss
+* [X] add gnss
 * [X] change lasermapping to class
 * [ ] add vgicp
-* [ ] add compute of normal
+* [X] add compute of normal
 
 在类中使用ikdtree效果较差
 
