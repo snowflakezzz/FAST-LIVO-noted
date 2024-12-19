@@ -134,7 +134,7 @@ bool ImuProcess::detectZeroVelocity(const MeasureGroup &meas)
   // }
 
   // 使用比力和角速度的摸进行零速检测 检测阈值与数据类型相关？如何自适应检测
-  if((abs(mean_acc.norm()-G_m_s2) < 0.1) && (abs(mean_gyr.norm()) < 0.1))
+  // if((abs(mean_acc.norm()-G_m_s2) < 0.1) && (abs(mean_gyr.norm()) < 0.1))
     return true;
   // if((cov_acc.x() < ZERO_VELOCITY_ACC_THRESHOLD) && (cov_acc.y() < ZERO_VELOCITY_ACC_THRESHOLD) &&
   //     (cov_acc.z() < ZERO_VELOCITY_ACC_THRESHOLD) && (cov_gyr.x() < ZERO_VELOCITY_GYR_THRESHOLD) &&
@@ -164,23 +164,25 @@ void ImuProcess::IMU_init(const MeasureGroup &meas, StatesGroup &state_inout, in
 
   if(is_zero_velocity)
   {
-    Vector3d gdir = Vector3d(0, 0, 1.0);  // imu朝向右前上
-    // if(mean_acc.z() < 0) gdir *= -1.0;    // mini的imu朝向非常奇怪 下？？
-    state_inout.gravity = -1.0 * gdir * G_m_s2;  // UndistortPcl
+    // Vector3d gdir = Vector3d(0, 0, 1.0);  // imu朝向右前上
+    // #ifdef MINI
+    // gdir = Vector3d(-1.0, 0, 0);  // mini的imu朝向非常奇怪 下右后
+    // #endif
+    // state_inout.gravity = -1.0 * gdir * G_m_s2;  // UndistortPcl
 
-    // 首帧调整为水平方向，todo：杆臂也得调整
-    Vector3d diracc = mean_acc / mean_acc.norm();
-    Vector3d axis = gdir.cross(diracc);
-    axis  /= axis.norm();
-    double cosg = gdir.dot(diracc);
-    double ang = acos(cosg);
-    M3D R_g_imu = AngleAxisd(ang, axis).matrix();
+    // // 首帧调整为水平方向，todo：杆臂也得调整
+    // Vector3d diracc = mean_acc / mean_acc.norm();
+    // Vector3d axis = gdir.cross(diracc);
+    // axis  /= axis.norm();
+    // double cosg = gdir.dot(diracc);
+    // double ang = acos(cosg);
+    // M3D R_g_imu = AngleAxisd(ang, axis).matrix();
 
-    state_inout.rot_end = R_g_imu;
-    state_inout.bias_g  = mean_gyr;
-
-    // state_inout.gravity = -mean_acc / mean_acc.norm() * G_m_s2;
+    // state_inout.rot_end = R_g_imu;       // Rwi
     // state_inout.bias_g  = mean_gyr;
+
+    state_inout.gravity = -mean_acc / mean_acc.norm() * G_m_s2;
+    state_inout.bias_g  = mean_gyr;
 
     cov_acc = cov_acc * pow(G_m_s2 / mean_acc.norm(), 2);
     cov_acc = cov_acc.cwiseProduct(cov_acc_scale);

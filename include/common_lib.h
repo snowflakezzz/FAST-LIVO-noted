@@ -265,10 +265,10 @@ struct SparseMap
         this->Pcl = Zero3d;
     } ;
 
-    void set_camera2lidar(vector<double>& R,  vector<double>& P )
+    void set_camera2lidar(M3D& Rcl_,  V3D& Pcl_ )
     {
-        this->Rcl << MAT_FROM_ARRAY(R);
-        this->Pcl << VEC_FROM_ARRAY(P);
+        this->Rcl = Rcl_;
+        this->Pcl = Pcl_;
     };   
         
     void delete_points()

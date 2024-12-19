@@ -50,15 +50,15 @@ void LidarSelector::init()
     Jdphi_dR = Rci;
     Pic = -Rci.transpose() * Pci;
     M3D tmp;
-    tmp << SKEW_SYM_MATRX(Pic);
+    tmp << SKEW_SYM_MATRX(Pic); // 反对称矩阵
     Jdp_dR = -Rci * tmp;
     width = cam->width();
     height = cam->height();
     grid_n_width = static_cast<int>(width/grid_size);
     grid_n_height = static_cast<int>(height/grid_size);
     length = grid_n_width * grid_n_height;                  // 图像中划分的格网个数
-    fx = cam->errorMultiplier2();
-    fy = cam->errorMultiplier() / (4. * fx);
+    // fx = cam->errorMultiplier2();                        // 获取焦距
+    // fy = cam->errorMultiplier() / (4. * fx);
     grid_num = new int[length];
     map_index = new int[length];
     map_value = new float[length];
@@ -77,11 +77,6 @@ void LidarSelector::init()
     pg_down.reset(new PointCloudXYZI());
     Map_points.reset(new PointCloudXYZI());
     Map_points_output.reset(new PointCloudXYZI());
-    weight_scale_ = 10;
-    weight_function_.reset(new vk::robust_cost::HuberWeightFunction());
-    // weight_function_.reset(new vk::robust_cost::TukeyWeightFunction());
-    scale_estimator_.reset(new vk::robust_cost::UnitScaleEstimator());
-    // scale_estimator_.reset(new vk::robust_cost::MADScaleEstimator());
 }
 
 void LidarSelector::reset_grid()
@@ -349,6 +344,7 @@ void LidarSelector::createPatchFromPatchWithBorder(float* patch_with_border, flo
   }
 }
 
+// pg世界坐标系下的点
 void LidarSelector::addFromSparseMap(cv::Mat img, PointCloudXYZI::Ptr pg)
 {
     if(feat_map.size()<=0) return;
@@ -415,10 +411,12 @@ void LidarSelector::addFromSparseMap(cv::Mat img, PointCloudXYZI::Ptr pg)
                 float depth = pt_c[2];
                 int col = int(px[0]);
                 int row = int(px[1]);
-                it[width*row+col] = depth;        
+                it[width*row+col] = depth;
+                // cv::circle(img, cv::Point(px[0], px[1]), 6, cv::Scalar(0, 255, 0), -1, 8);
             }
         }
     }
+    // cv::imwrite("/home/zxq/Documents/02base/std/image.png", img);
     // printf("A. projection: %.6lf \n", omp_get_wtime() - ts0);
     std::cout << " sub_feat_map size: " << sub_feat_map.size() <<std::endl;
 
@@ -962,7 +960,7 @@ void LidarSelector::addObservation(cv::Mat img)
                 ftr_new->id_ = new_frame_->id_;
                 // ftr_new->ImgPyr.resize(5);
                 // for(int i=0;i<5;i++) ftr_new->ImgPyr[i] = new_frame_->img_pyr_[i];
-                pt->addFrameRef(ftr_new);      
+                pt->addFrameRef(ftr_new);
             }
         }
     }
@@ -1016,7 +1014,7 @@ V3F LidarSelector::getpixel(cv::Mat img, V2D pc)
     const int v_ref_i = floorf(pc[1]);
     const float subpix_u_ref = (u_ref-u_ref_i);
     const float subpix_v_ref = (v_ref-v_ref_i);
-    const float w_ref_tl = (1.0-subpix_u_ref) * (1.0-subpix_v_ref);
+    const float w_ref_tl = (1.0-subpix_u_ref) * (1.0-subpix_v_ref);     // 线性插值
     const float w_ref_tr = subpix_u_ref * (1.0-subpix_v_ref);
     const float w_ref_bl = (1.0-subpix_u_ref) * subpix_v_ref;
     const float w_ref_br = subpix_u_ref * subpix_v_ref;

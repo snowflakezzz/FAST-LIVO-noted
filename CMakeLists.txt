@@ -11,7 +11,7 @@ add_definitions(-DROOT_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/\")
 
 add_definitions(-w)
 # add_definitions(-DUSE_VGICP)
-# add_definitions(-DUSE_IKFOM)
+# add_definitions(-DMINI)
 # add_definitions(-DUSE_ikdtree)
 # add_definitions(-DDEBUG_PRINT)
 # add_definitions(-DUSE_FOV_Checker)

@@ -24,7 +24,7 @@ class LidarSelector {
     SparseMap* sparse_map;
     StatesGroup* state;
     StatesGroup* state_propagat;
-    M3D Rli, Rci, Rcw, Jdphi_dR, Jdp_dt, Jdp_dR;  // world系到camera的旋转矩阵，平移向量
+    M3D Rli, Rci, Rcw, Jdphi_dR, Jdp_dt, Jdp_dR;
     V3D Pli, Pci, Pcw;
     int* align_flag;
     int* grid_num;
@@ -40,8 +40,6 @@ class LidarSelector {
     int debug, patch_size, patch_size_total, patch_size_half;
     int count_img, MIN_IMG_COUNT;
     int NUM_MAX_ITERATIONS;
-    vk::robust_cost::WeightFunctionPtr weight_function_;
-    float weight_scale_;
     double img_point_cov, outlier_threshold, ncc_thre;
     size_t n_meas_;                //!< Number of measurements
     deque< PointPtr > map_cur_frame_;
@@ -49,7 +47,6 @@ class LidarSelector {
     double computeH, ekf_time;
     double ave_total = 0.0;
     int frame_count = 0;
-    vk::robust_cost::ScaleEstimatorPtr scale_estimator_;
 
     Matrix<double, DIM_STATE, DIM_STATE> G, H_T_H;
     MatrixXd H_sub, K;
