@@ -11,9 +11,6 @@ LaserMapping::LaserMapping()
     p_pre = std::make_shared<Preprocess>();
     p_imu = std::make_shared<ImuProcess>();
 
-    featsFromMap = boost::make_shared<PointCloudXYZI>();
-    cube_points_add = boost::make_shared<PointCloudXYZI>();
-    map_cur_frame_point = boost::make_shared<PointCloudXYZI>();
     sub_map_cur_frame_point = boost::make_shared<PointCloudXYZI>();
     feats_undistort = boost::make_shared<PointCloudXYZI>();
     feats_down_body = boost::make_shared<PointCloudXYZI>();
@@ -27,6 +24,13 @@ LaserMapping::LaserMapping()
 
     pathout.open(DEBUG_FILE_DIR("tum.txt"), std::ios::out);
 }
+
+LaserMapping::~LaserMapping(){ 
+    pathout.close();
+    if(loop_en){
+        thread_loop_.detach();//join();
+    }
+};
 
 void LaserMapping::Run(){
     // step1 数据对齐，存入LidarMeasures
@@ -257,7 +261,9 @@ void LaserMapping::Run(){
     {
         RGBpointBodyToWorld(&laserCloudFullRes->points[i], &laserCloudWorld->points[i]);
     }
+    std::unique_lock<std::mutex> lock(m_loop_rady);
     *pcl_wait_pub = *laserCloudWorld;
+    lock.unlock();
 
     if(!img_en) publish_frame_world();
     publish_effect_world();
@@ -739,8 +745,6 @@ bool LaserMapping::InitROS(ros::NodeHandle &nh){
             ("/aft_mapped_to_init", 10);
     pubPath          = nh.advertise<nav_msgs::Path> 
             ("/path", 10);
-    pubLaserCloudFullRes_body = nh.advertise<sensor_msgs::PointCloud2>
-            ("/cloud_registered_body", 100000);
     return true;
 }
 
@@ -883,6 +887,7 @@ void LaserMapping::readParameters(ros::NodeHandle &nh)
     nh.param<int>("img_enable",img_en,1);
     nh.param<int>("lidar_enable",lidar_en,1);
     nh.param<int>("gnss/gnss_en", bgnss_en, 0);
+    nh.param<int>("loop_enable", loop_en, 0);
     nh.param<int>("debug", debug, 0);
     nh.param<int>("max_iteration",NUM_MAX_ITERATIONS,4);
     nh.param<bool>("ncc_en",ncc_en,false);
@@ -983,6 +988,13 @@ void LaserMapping::readParameters(ros::NodeHandle &nh)
         if(!gnss_path.empty()) p_gnss->readrtkresult(gnss_path);
     }
 
+    if(loop_en){
+        ConfigSetting config_setting;
+        read_parameters(nh, config_setting);
+        p_stdloop = std::make_shared<STDescManager>(config_setting);
+        thread_loop_ = std::thread(&LaserMapping::loop_detect, this);
+    }
+
     // step3 imu相关参数设定
     p_imu->set_extrinsic(Lidar_offset_to_IMU, Lidar_rot_to_IMU);
     p_imu->set_gyr_cov_scale(V3D(gyr_cov_scale, gyr_cov_scale, gyr_cov_scale));
@@ -997,6 +1009,60 @@ void LaserMapping::readParameters(ros::NodeHandle &nh)
     path.header.stamp    = ros::Time::now();
     path.header.frame_id ="camera_init";
 }
+
+void LaserMapping::loop_detect(){
+    size_t cloudInd = 0;
+    size_t keyCloudInd = 0;
+    pcl::PointCloud<pcl::PointXYZI>::Ptr key_cloud(new pcl::PointCloud<pcl::PointXYZI>);
+
+    while(1){
+        std::unique_lock<std::mutex> lock(m_loop_rady);
+        loop_cv.wait(lock, [this] {return loop_ready;});
+        loop_ready = false;
+
+        pcl::PointCloud<pcl::PointXYZI>::Ptr current_cloud(new pcl::PointCloud<pcl::PointXYZI>);
+        pcl::copyPointCloud(*pcl_wait_pub, *current_cloud);
+        lock.unlock();
+
+        *key_cloud += *current_cloud;
+
+        // 累积目标数目帧为一个关键帧
+        if (cloudInd % p_stdloop->config_setting_.sub_frame_num_ == 0 && cloudInd != 0){
+
+            // step1 描述子提取
+            std::vector<STDesc> stds_vec;
+            p_stdloop->GenerateSTDescs(key_cloud, stds_vec);
+            key_cloud->clear();
+
+            // step2 回环检测
+            std::pair<int, double> search_result(-1, 0);        // 搜索到的帧id，及回环分数
+            std::pair<Eigen::Vector3d, Eigen::Matrix3d> loop_transform;     // 回环的两帧之间的位姿变换
+            loop_transform.first << 0, 0, 0;
+            loop_transform.second = Eigen::Matrix3d::Identity();
+            std::vector<std::pair<STDesc, STDesc>> loop_std_pair;   // 匹配上的三角描述子
+            if (keyCloudInd > p_stdloop->config_setting_.skip_near_num_) {
+                p_stdloop->SearchLoop(stds_vec, search_result, loop_transform,
+                                        loop_std_pair);
+            }
+
+            // step3 将三角特征添加到数据库中
+            p_stdloop->AddSTDescs(stds_vec);
+
+            if(search_result.first > 0){
+                std::fstream fout(DEBUG_FILE_DIR("loop_result.txt"), std::ios::app);
+                fout << "[Loop Detection] triggle loop: " << keyCloudInd << "--"
+                    << search_result.first << ", score:" << search_result.second
+                    << std::endl;
+                fout.close();
+            }
+
+            ++keyCloudInd;
+        }
+
+        cloudInd++;
+    }
+}
+
 
 void LaserMapping::publish_frame_world_rgb()
 {
@@ -1025,22 +1091,25 @@ void LaserMapping::publish_frame_world_rgb()
                     pointRGB.g = pixel[1];
                     pointRGB.b = pixel[0];
                     laserCloudWorldRGB->push_back(pointRGB);
-
-                    // cv::circle(img_rgb, cv::Point(pc(0), pc(1)), 3, cv::Scalar(0, 255, 0), -1);
                 }
             }
         });
-
     }
 
-    if (1)//if(publish_count >= PUBFRAME_PERIOD)
+    if (1)
     {
         sensor_msgs::PointCloud2 laserCloudmsg;
         if (img_en)
         {
-            // cout<<"RGB pointcloud size: "<<laserCloudWorldRGB->size()<<endl;
             pcl::toROSMsg(*laserCloudWorldRGB, laserCloudmsg);
-            // pcl::toROSMsg(*laserCloudWorld, laserCloudmsg);
+
+            if(!laserCloudWorldRGB->points.empty()){
+                std::unique_lock<std::mutex> lock(m_loop_rady);
+                pcl::copyPointCloud(*laserCloudWorldRGB, *pcl_wait_pub);
+                loop_ready = true;
+                lock.unlock();
+                loop_cv.notify_all();   // 唤醒正在等待的线程
+            }
         }
         else
         {
@@ -1079,19 +1148,13 @@ void LaserMapping::publish_odometry()
             << geoQuat.x << " " << geoQuat.y << " " << geoQuat.z << " " << geoQuat.w << std::endl;
 }
 
+// 可视化图像上的点
 void LaserMapping::publish_visual_world_sub_map()
 {
     PointCloudXYZI::Ptr laserCloudFullRes(sub_map_cur_frame_point);
     int size = laserCloudFullRes->points.size();
     if (size==0) return;
-    // PointCloudXYZI::Ptr laserCloudWorld( new PointCloudXYZI(size, 1));
 
-    // for (int i = 0; i < size; i++)
-    // {
-    //     RGBpointBodyToWorld(&laserCloudFullRes->points[i], \
-    //                         &laserCloudWorld->points[i]);
-    // }
-    // mtx_buffer_pointcloud.lock();
     PointCloudXYZI::Ptr sub_pcl_visual_wait_pub(new PointCloudXYZI());
     *sub_pcl_visual_wait_pub = *laserCloudFullRes;
     if (1)//if(publish_count >= PUBFRAME_PERIOD)
@@ -1126,6 +1189,7 @@ void LaserMapping::publish_frame_world()
     if (pcd_save_en) *pcl_wait_save_lidar += *pcl_wait_pub;
 }
 
+// 显示雷达中的有效约束点
 void LaserMapping::publish_effect_world()
 {
     PointCloudXYZI::Ptr laserCloudWorld( \
@@ -1159,13 +1223,3 @@ void LaserMapping::publish_path()
     pubPath.publish(path);
 }
 
-void LaserMapping::publish_frame_body()
-{
-    PointCloudXYZI::Ptr laserCloudFullRes(feats_undistort);
-    sensor_msgs::PointCloud2 laserCloudmsg;
-    pcl::toROSMsg(*feats_undistort, laserCloudmsg);
-    // laserCloudmsg.header.stamp = ros::Time::now();//.fromSec(lidar_end_time);
-    laserCloudmsg.header.stamp = ros::Time().fromSec(LidarMeasures.last_update_time);
-    laserCloudmsg.header.frame_id = "camera_init";
-    pubLaserCloudFullRes_body.publish(laserCloudmsg);
-}

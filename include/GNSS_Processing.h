@@ -21,6 +21,7 @@
 #include <ceres/ceres.h>
 #include <mutex>
 #include <thread>
+#include <condition_variable>
 
 class GNSSProcessing
 {
@@ -54,6 +55,8 @@ private:
     bool                new_gnss_;
     bool                ready_comp_;    // 是否准备好解算
     std::thread         thread_opt_;
+    std::mutex          ready_mutex_;
+    std::condition_variable ready_cv_;
 
     // ros::Subscriber odo_sub_;
     ros::Subscriber gnss_sub_;

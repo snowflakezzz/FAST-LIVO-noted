@@ -819,6 +819,7 @@ void publish_visual_world_sub_map(const ros::Publisher & pubSubVisualCloud)
     // mtx_buffer_pointcloud.unlock();
 }
 
+// 显示有效约束
 void publish_effect_world(const ros::Publisher & pubLaserCloudEffect)
 {
     PointCloudXYZI::Ptr laserCloudWorld( \

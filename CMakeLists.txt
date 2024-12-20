@@ -105,10 +105,9 @@ catkin_package(
   INCLUDE_DIRS include
 )
 
-add_library(ikdtree include/ikd-Tree/ikd_Tree.cpp
-                    # include/ikd-Forest/ikd_Forest.cpp 
-                    # include/FOV_Checker/FOV_Checker.cpp
+add_library(std include/STD/STDesc.cpp
                     )
+
 add_library(vio src/lidar_selection.cpp
                 src/frame.cpp
                 src/point.cpp
@@ -120,7 +119,7 @@ add_executable(fastlivo_mapping src/laserMapping.cpp
                                 src/GNSS_Processing.cpp
                                 src/laser_mapping.cpp
                                 )
-target_link_libraries(fastlivo_mapping ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${PYTHON_LIBRARIES} ${CERES_LIBRARIES} vio ikdtree)
+target_link_libraries(fastlivo_mapping ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${PYTHON_LIBRARIES} ${CERES_LIBRARIES} vio std)
 target_include_directories(fastlivo_mapping PRIVATE ${PYTHON_INCLUDE_DIRS})
 
 

@@ -38,6 +38,7 @@
 #include "GNSS_Processing.h"
 #include "ivox3d/ivox3d.h"
 #include <pcl/kdtree/kdtree_flann.h>
+#include "STD/STDesc.h"
 #ifdef USE_ikdtree
 #include "ikd-Tree/ikd_Tree.h"
 #endif
@@ -52,7 +53,7 @@ public:
     using IVoxType = faster_lio::IVox<3, faster_lio::IVoxNodeType::DEFAULT, PointType>;
 
     LaserMapping();
-    ~LaserMapping(){ pathout.close(); };
+    ~LaserMapping();
 
     bool InitROS(ros::NodeHandle &nh);
 
@@ -70,6 +71,7 @@ private:
     void h_share_model(MatrixXd &HPH, VectorXd &HPL);
 
     void map_incremental();
+    void loop_detect();
 
     void pointBodyToWorld(PointType const * const pi, PointType * const po);
     void RGBpointBodyToWorld(PointType const * const pi, PointType * const po);
@@ -87,7 +89,6 @@ private:
     void publish_frame_world();
     void publish_effect_world();
     void publish_path();
-    void publish_frame_body();
 
     /// modules
     IVoxType::Options ivox_options_;
@@ -95,7 +96,10 @@ private:
     shared_ptr<Preprocess> p_pre;
     shared_ptr<ImuProcess> p_imu;
     GNSSProcessing::Ptr p_gnss;
-    lidar_selection::LidarSelectorPtr lidar_selector;
+    STDescManager::Ptr p_stdloop;
+    lidar_selection::LidarSelectorPtr lidar_selector;              // visual part
+
+    std::thread         thread_loop_;
 
     PointCloudXYZI::Ptr pcl_wait_pub;
     mutex mtx_buffer;
@@ -110,25 +114,27 @@ private:
 
     //double last_timestamp_lidar,  当前接收到的最新imu数据的时间戳;
     double last_timestamp_lidar = 0, last_timestamp_imu = -1.0, last_timestamp_img = -1.0;
-    //double filter_size_corner_min, filter_size_surf_min, filter_size_map_min, fov_deg;
+
     double filter_size_corner_min = 0, fov_deg = 0, filter_size_map_min = 0;
-    //double cube_len, HALF_FOV_COS, total_distance, lidar_end_time, first_lidar_time = 0.0;
+
     double cube_len = 0, total_distance = 0, lidar_end_time = 0, first_lidar_time = 0.0;
     double first_img_time=-1.0;
-    //double kdtree_incremental_time, kdtree_search_time;
+
     double kdtree_incremental_time = 0, kdtree_search_time = 0, kdtree_delete_time = 0.0;
     int kdtree_search_counter = 0, kdtree_size_st = 0, kdtree_size_end = 0, add_point_size = 0, kdtree_delete_counter = 0;;
-    //double copy_time, readd_time, fov_check_time, readd_box_time, delete_box_time;
+
     double copy_time = 0, readd_time = 0, fov_check_time = 0, readd_box_time = 0, delete_box_time = 0;
     double T1[MAXN], T2[MAXN], s_plot[MAXN], s_plot2[MAXN], s_plot3[MAXN], s_plot4[MAXN], s_plot5[MAXN], s_plot6[MAXN], s_plot7[MAXN];
 
     double match_time = 0, solve_time = 0, solve_const_H_time = 0;
 
-    bool lidar_pushed, flg_reset, flg_exit = false;
+    bool lidar_pushed, flg_reset = false;
     int dense_map_en = 1;
     int img_en = 1;                 // 是否使用视觉观测
     int lidar_en = 1;               // 是否使用Lidar观测
-    int bgnss_en = 1;
+    int bgnss_en = 1;               // 是否使用GPS
+    int loop_en = 1;                // 是否进行回环检测
+    bool loop_ready = false;         // 回环是否接收到新帧
     int debug = 0;
     bool fast_lio_is_ready = false;
     double delta_time = 0.0;
@@ -142,9 +148,6 @@ private:
     double LASER_POINT_COV; 
     bool flg_EKF_inited, flg_EKF_converged;
     //surf feature in map
-    PointCloudXYZI::Ptr featsFromMap;
-    PointCloudXYZI::Ptr cube_points_add;
-    PointCloudXYZI::Ptr map_cur_frame_point;
     PointCloudXYZI::Ptr sub_map_cur_frame_point;
 
     PointCloudXYZI::Ptr feats_undistort;
@@ -188,7 +191,6 @@ private:
     ros::Publisher pubLaserCloudMap;
     ros::Publisher pubOdomAftMapped;
     ros::Publisher pubPath;
-    ros::Publisher pubLaserCloudFullRes_body;   // for m-detector
     image_transport::Publisher img_pub;
 
     // 滤波优化相关参数
@@ -198,5 +200,9 @@ private:
     bool nearest_search_en;                     // 判断是否要进行最近临点搜索
 
     ofstream pathout;
+
+    // 多线程相关参数
+    std::condition_variable loop_cv;
+    std::mutex m_loop_rady;
 };
 #endif

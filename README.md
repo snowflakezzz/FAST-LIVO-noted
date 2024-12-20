@@ -4,9 +4,12 @@
 * [X] change lasermapping to class
 * [ ] add vgicp
 * [X] add compute of normal
+* [X] add std loop
+
+在类中实现了std回环检测，不需要ros节点传输数据
 
 在类中使用ikdtree效果较差
-
+在类中多线程使用Eigen::ComputeThinU的svd分解会出问题，要用Eigen::ComputeFullU
 
 # FAST-LIVO
 

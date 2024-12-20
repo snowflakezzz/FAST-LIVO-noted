@@ -9,6 +9,7 @@ grid_size : 20  # 40
 patch_size : 4   # 8
 img_enable : 1 #1
 lidar_enable : 1
+loop_enable : 1
 outlier_threshold : 300 # 78 100 156
 ncc_en: false
 ncc_thre: 0
@@ -52,3 +53,37 @@ camera:
          -0.0157155, -0.0131319,   -0.99979,
           -0.0325641,    0.99939, -0.0126148]
     Pcl: [-0.0111367, 0.0432606, 0.172745]
+
+std:
+    # pre process
+    ds_size: 0.1
+    maximum_corner_num: 100
+
+    # key points
+    plane_detection_thre: 0.01
+    plane_merge_normal_thre: 0.1
+    plane_merge_dis_thre: 0.3
+    voxel_size: 2
+    voxel_init_num: 10
+    proj_image_resolution: 0.5
+    proj_dis_min: 0
+    proj_dis_max: 5
+    corner_thre: 10
+
+
+    # std descriptor
+    descriptor_near_num: 20
+    descriptor_min_len: 2
+    descriptor_max_len: 30
+    non_max_suppression_radius: 2
+    std_side_resolution: 0.2
+
+    # candidate search
+    skip_near_num: 50
+    candidate_num: 50
+    sub_frame_num: 10
+    vertex_diff_threshold: 0.5
+    rough_dis_threshold: 0.01
+    normal_threshold: 0.2
+    dis_threshold: 0.5
+    icp_threshold: 0.4

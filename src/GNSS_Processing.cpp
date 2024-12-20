@@ -187,7 +187,10 @@ void GNSSProcessing::addIMUpos(const vector<Pose6D> &IMUpose, const double pcl_b
                     break;
                 }
                 
+                std::unique_lock<std::mutex> lock(ready_mutex_);
                 ready_comp_ = true;
+                lock.unlock();
+                ready_cv_.notify_all();     // 唤醒优化线程
                 break;
             }
         }
@@ -253,103 +256,102 @@ void GNSSProcessing::gnssOutlierCullingByChi2(ceres::Problem & problem,
 
 bool GNSSProcessing::optimize(){
     while(true){        // 初始化的误差纳入到优化中了
-        if(ready_comp_){
-            ready_comp_ = false;
+        std::unique_lock<std::mutex> lock(ready_mutex_);
+        ready_cv_.wait(lock, [&](){return ready_comp_;});
+        ready_comp_ = false;
+        lock.unlock();
 
-            ceres::Problem problem;
-            ceres::Solver::Options options;
-            options.linear_solver_type = ceres::SPARSE_NORMAL_CHOLESKY;
-            options.max_num_iterations = 50;
+        ceres::Problem problem;
+        ceres::Solver::Options options;
+        options.linear_solver_type = ceres::SPARSE_NORMAL_CHOLESKY;
+        options.max_num_iterations = 50;
 
-            ceres::Solver::Summary summary;
-            ceres::LossFunction *loss_function = new ceres::HuberLoss(1.0);
+        ceres::Solver::Summary summary;
+        ceres::LossFunction *loss_function = new ceres::HuberLoss(1.0);
 
-            odo_mutex_.lock();
-            gnss_mutex_.lock();
+        odo_mutex_.lock();
+        gnss_mutex_.lock();
 
-            int len = odo_path_.size();
-            double t_array[len][3];
-            map<double, Vector3d>::iterator iter = odo_path_.begin();
-            for(int i=0; i<len; i++, iter++){
-                t_array[i][0] = iter->second.x();
-                t_array[i][1] = iter->second.y();
-                t_array[i][2] = iter->second.z();
-                problem.AddParameterBlock(t_array[i], 3);
+        int len = odo_path_.size();
+        double t_array[len][3];
+        map<double, Vector3d>::iterator iter = odo_path_.begin();
+        for(int i=0; i<len; i++, iter++){
+            t_array[i][0] = iter->second.x();
+            t_array[i][1] = iter->second.y();
+            t_array[i][2] = iter->second.z();
+            problem.AddParameterBlock(t_array[i], 3);
+        }
+
+        map<double, Vector3d>::iterator iter_odo, iter_odo_next;
+        map<double, GNSS>::iterator iter_gnss;
+        vector<std::pair<ceres::ResidualBlockId, GNSS>> residual_block;
+        vector<int> array_index;
+        int i = 0;
+        // #par
+        for (auto iter_odo = odo_path_.begin(); iter_odo != odo_path_.end(); iter_odo++, i++){
+            iter_odo_next = iter_odo;
+            iter_odo_next ++;
+            if(i<len-1){
+                Eigen::Vector3d tij = iter_odo_next->second - iter_odo->second;
+                ceres::CostFunction* odo_function = new OdoFactor(tij, 0.1);
+                problem.AddResidualBlock(odo_function, nullptr, t_array[i], t_array[i+1]);
             }
 
-            map<double, Vector3d>::iterator iter_odo, iter_odo_next;
-            map<double, GNSS>::iterator iter_gnss;
-            vector<std::pair<ceres::ResidualBlockId, GNSS>> residual_block;
-            vector<int> array_index;
-            int i = 0;
-            // #par
-            for (auto iter_odo = odo_path_.begin(); iter_odo != odo_path_.end(); iter_odo++, i++){
-                iter_odo_next = iter_odo;
-                iter_odo_next ++;
-                if(i<len-1){
-                    Eigen::Vector3d tij = iter_odo_next->second - iter_odo->second;
-                    ceres::CostFunction* odo_function = new OdoFactor(tij, 0.1);
-                    problem.AddResidualBlock(odo_function, nullptr, t_array[i], t_array[i+1]);
-                }
+            double t = iter_odo->first;
+            iter_gnss = gnss_buffer_.find(t);
+            if (iter_gnss != gnss_buffer_.end()){
+                ceres::CostFunction* gnss_function = new GnssFactor(iter_gnss->second, antlever_, yaw_);
+                auto id = problem.AddResidualBlock(gnss_function, loss_function, t_array[i]);
+                residual_block.push_back(std::make_pair(id, iter_gnss->second));
+                array_index.push_back(i);
+            }
+        }
 
-                double t = iter_odo->first;
-                iter_gnss = gnss_buffer_.find(t);
-                if (iter_gnss != gnss_buffer_.end()){
-                    ceres::CostFunction* gnss_function = new GnssFactor(iter_gnss->second, antlever_, yaw_);
-                    auto id = problem.AddResidualBlock(gnss_function, loss_function, t_array[i]);
-                    residual_block.push_back(std::make_pair(id, iter_gnss->second));
-                    array_index.push_back(i);
-                }
+        ceres::Solve(options, &problem, &summary);
+
+        if(1)
+        { // gnss卡方检测并给gnss观测赋予新的权重
+            gnssOutlierCullingByChi2(problem, residual_block);
+
+            i = 0;
+            for(auto res : residual_block){
+                problem.RemoveResidualBlock(res.first);
+
+                ceres::CostFunction* gnss_function = new GnssFactor(res.second, antlever_, yaw_);
+                int index = array_index[i];
+                problem.AddResidualBlock(gnss_function, nullptr, t_array[index]);
+                i++;
             }
 
             ceres::Solve(options, &problem, &summary);
+            // int index = t_array.size()-1;
+            // cur_pos = Vector3d(t_array[index][0], t_array[index][1], t_array[index][2]);    // 方差怎么修改？
+        
+            // ceres::Covariance::Options options;
+            // ceres::Covariance covariance(options);
 
-            if(1)
-            { // gnss卡方检测并给gnss观测赋予新的权重
-                gnssOutlierCullingByChi2(problem, residual_block);
+            // i=0;
+            // for(auto iter_odo=odo_path_.begin(); iter_odo != odo_path_.end(); iter_odo++, i++){
+            //     iter_odo->second = Vector3d(t_array[i][0], t_array[i][1], t_array[i][2]);
+            // }
 
-                i = 0;
-                for(auto res : residual_block){
-                    problem.RemoveResidualBlock(res.first);
+            if(gnss_buffer_.size() >= 100){
+                // gnss_buffer_.clear();
+                i = 0; std::ofstream outfile;
+                outfile.open(DEBUG_FILE_DIR("gnss_odo.txt"), std::ios::out);
 
-                    ceres::CostFunction* gnss_function = new GnssFactor(res.second, antlever_, yaw_);
-                    int index = array_index[i];
-                    problem.AddResidualBlock(gnss_function, nullptr, t_array[index]);
-                    i++;
+                for(auto iter_odo = odo_path_.begin(); iter_odo != odo_path_.end(); iter_odo++, i++){
+                    outfile << std::fixed << std::setprecision(6) << iter_odo->first << " " \
+                        << t_array[i][0] << " " << t_array[i][1] << " " << t_array[i][2] \
+                        << " " << 0.0 << " " << 0.0 << " " << 0.0 << " " << 0.0 << endl;
                 }
-
-                ceres::Solve(options, &problem, &summary);
-                // int index = t_array.size()-1;
-                // cur_pos = Vector3d(t_array[index][0], t_array[index][1], t_array[index][2]);    // 方差怎么修改？
-            
-                // ceres::Covariance::Options options;
-                // ceres::Covariance covariance(options);
-
-                // i=0;
-                // for(auto iter_odo=odo_path_.begin(); iter_odo != odo_path_.end(); iter_odo++, i++){
-                //     iter_odo->second = Vector3d(t_array[i][0], t_array[i][1], t_array[i][2]);
-                // }
-
-                if(gnss_buffer_.size() >= 100){
-                    // gnss_buffer_.clear();
-                    i = 0; std::ofstream outfile;
-                    outfile.open(DEBUG_FILE_DIR("gnss_odo.txt"), std::ios::out);
-
-                    for(auto iter_odo = odo_path_.begin(); iter_odo != odo_path_.end(); iter_odo++, i++){
-                        outfile << std::fixed << std::setprecision(6) << iter_odo->first << " " \
-                            << t_array[i][0] << " " << t_array[i][1] << " " << t_array[i][2] \
-                            << " " << 0.0 << " " << 0.0 << " " << 0.0 << " " << 0.0 << endl;
-                    }
-                    outfile.close();
-                    // odo_path_.clear();
-                }
+                outfile.close();
+                // odo_path_.clear();
             }
-
-            odo_mutex_.unlock();
-            gnss_mutex_.unlock();
         }
-        std::chrono::milliseconds dura(2000);
-        std::this_thread::sleep_for(dura);
+
+        odo_mutex_.unlock();
+        gnss_mutex_.unlock();
     }
     return true;
 }

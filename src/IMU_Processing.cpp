@@ -134,7 +134,7 @@ bool ImuProcess::detectZeroVelocity(const MeasureGroup &meas)
   // }
 
   // 使用比力和角速度的摸进行零速检测 检测阈值与数据类型相关？如何自适应检测
-  // if((abs(mean_acc.norm()-G_m_s2) < 0.1) && (abs(mean_gyr.norm()) < 0.1))
+  if((abs(mean_acc.norm()-G_m_s2) < 0.1) && (abs(mean_gyr.norm()) < 0.1))
     return true;
   // if((cov_acc.x() < ZERO_VELOCITY_ACC_THRESHOLD) && (cov_acc.y() < ZERO_VELOCITY_ACC_THRESHOLD) &&
   //     (cov_acc.z() < ZERO_VELOCITY_ACC_THRESHOLD) && (cov_gyr.x() < ZERO_VELOCITY_GYR_THRESHOLD) &&
