@@ -92,6 +92,19 @@ void read_parameters(ros::NodeHandle &nh, ConfigSetting &config_setting) {
   nh.param<double>("std/normal_threshold", config_setting.normal_threshold_, 0.2);
   nh.param<double>("std/dis_threshold", config_setting.dis_threshold_, 0.5);
 
+  #ifdef USE_IMG
+  // brief相关参数
+  std::string pattern_file;
+  nh.param<std::string>("std/pattern_file", pattern_file, "");
+  cv::FileStorage fs(pattern_file.c_str(), cv::FileStorage::READ);
+  if(!fs.isOpened()) throw std::string("can not open pattern file") + pattern_file;
+
+  fs["x1"] >> config_setting.m_x1;
+  fs["x2"] >> config_setting.m_x2;
+  fs["y1"] >> config_setting.m_y1;
+  fs["y2"] >> config_setting.m_y2;
+  #endif
+
   std::cout << "Sucessfully load parameters:" << std::endl;
   std::cout << "----------------Main Parameters-------------------"
             << std::endl;
@@ -171,6 +184,10 @@ Eigen::Vector3d point2vec(const pcl::PointXYZI &pi) {
 
 bool attach_greater_sort(std::pair<double, int> a, std::pair<double, int> b) {
   return (a.first > b.first);
+}
+
+inline int hamming_distance(const bit_set &a, const bit_set &b){
+  return (a^b).count();
 }
 
 void publish_std_pairs(
@@ -304,6 +321,34 @@ void publish_std_pairs(
   m_line.id = 0;
   ma_line.markers.clear();
 }
+
+#ifdef USE_IMG
+void STDescManager::GenerateBinary(const cv::Mat &img, Eigen::Vector2d &p_cam, bit_set &out){
+  const int W = img.cols;
+  const int H = img.rows;
+
+  int x1, y1, x2, y2;
+  out.resize(256);
+  out.reset();
+
+  for(unsigned int i = 0; i < config_setting_.m_x1.size(); ++i)
+  {
+    x1 = (int)(p_cam(0) + config_setting_.m_x1[i]);
+    y1 = (int)(p_cam(1) + config_setting_.m_y1[i]);
+    x2 = (int)(p_cam(0) + config_setting_.m_x2[i]);
+    y2 = (int)(p_cam(1) + config_setting_.m_y2[i]);
+
+    if(x1 >= 0 && x1 < W && y1 >= 0 && y1 < H
+      && x2 >= 0 && x2 < W && y2 >= 0 && y2 < H)
+    {
+      if( img.ptr<unsigned char>(y1)[x1] < img.ptr<unsigned char>(y2)[x2] )
+      {
+        out.set(i);
+      }
+    }
+  }
+}
+#endif
 
 void STDescManager::GenerateSTDescs(
     pcl::PointCloud<pcl::PointXYZI>::Ptr &input_cloud,
@@ -993,11 +1038,6 @@ void STDescManager::build_stdesc(const pcl::PointCloud<pcl::PointXYZINormal>::Pt
             single_descriptor.vertex_attached_ = vertex_attached;
             single_descriptor.side_length_ << scale * a, scale * b, scale * c;
             single_descriptor.frame_id_ = current_frame_id_;
-            #ifdef USE_IMG
-            single_descriptor.des_A_.resize(256);
-            single_descriptor.des_B_.resize(256);
-            single_descriptor.des_C_.resize(256);
-            #endif
 
             Eigen::Matrix3d triangle_positon;
             feat_map[position] = true;
@@ -1064,6 +1104,19 @@ void STDescManager::candidate_selector(const std::vector<STDesc> &stds_vec, std:
               // rough filter with side lengths
               if (dis < dis_threshold) {
                 dis_match_cnt++;
+                #ifdef USE_IMG
+                double vertex_attach_diff = hamming_distance(src_std.des_A_, data_base_[position][j].des_A_)
+                                            + hamming_distance(src_std.des_B_, data_base_[position][j].des_B_)
+                                            + hamming_distance(src_std.des_C_, data_base_[position][j].des_C_);
+                vertex_attach_diff /= 3;
+
+                if (vertex_attach_diff > 200) {
+                  final_match_cnt++;
+                  useful_match[i] = true;
+                  useful_match_position[i].push_back(position);
+                  useful_match_index[i].push_back(j);
+                }
+                #else
                 // rough filter with vertex attached info
                 // step2.4 通过三角描述子顶点在投影过程中使用到的点数，进一步筛选
                 double vertex_attach_diff =
@@ -1083,6 +1136,7 @@ void STDescManager::candidate_selector(const std::vector<STDesc> &stds_vec, std:
                   useful_match_position[i].push_back(position);
                   useful_match_index[i].push_back(j);
                 }
+                #endif
               }
             }
           }
@@ -1415,46 +1469,6 @@ void STDescManager::PlaneGeomrtricIcp(
   transform.second = rot;
   // std::cout << "useful match for icp:" << useful_match << std::endl;
 }
-
-#ifdef USE_IMG
-// void STDescManager::GenerateBinary(std::vector<STDesc> &stds_vec, const cv::Mat &img, const Camera &cam){
-//   Eigen::Vector3d A_world, B_world, C_world;
-//   Eigen::Vector2d A_pixel, B_pixel, C_pixel;
-//   A_world = stds_vec[0].vertex_A_;
-//   B_world = stds_vec[0].vertex_B_;
-//   C_world = stds_vec[0].vertex_C_;
-
-//   if(!cam.SpacetoPlane(A_world, A_pixel) || !cam.SpacetoPlane(B_world, B_pixel)
-//        || !cam.SpacetoPlane(C_world, C_pixel))
-//     continue;
-  
-//   cv::Mat im;
-//   const cv::Size ksize(9, 9);
-//   const float sigma = 2.f;
-
-//   if(1) // treat_image
-//     cv::GaussianBlur(img, im, ksize, sigma, sigma);
-//   else im = img;
-//   stds_vec[0].des_A_.resize(256);
-//   int x1, x2, y1, y2;
-//   for(unsigned int i = 0; i < m_x1.size(); i++){
-//     x1 = (int)(A_pixel(0) + m_x1[i]);
-//     y1 = (int)(A_pixel(1) + m_y1[i]);
-//     x2 = (int)(A_pixel(0) + m_x2[i]);
-//     y2 = (int)(A_pixel(1) + m_y2[i]);
-
-//     if(x1 >= 0 && x1 < cam.imageWidth && y1 >= 0 && y1 < cam.imageHeight
-//       && x2 >= 0 && x2 < cam.imageWidth && y2 >= 0 && y2 < cam.imageHeight)
-//     {
-//       if( im.ptr<unsigned char>(y1)[x1] < im.ptr<unsigned char>(y2)[x2] )
-//       {
-//         stds_vec[0].des_A_.set(i);
-//       }
-//     } // if (x,y)_1 and (x,y)_2 are in the image
-//   }
-
-// }
-#endif
 
 void OctoTree::init_plane() {
   plane_ptr_->covariance_ = Eigen::Matrix3d::Zero();

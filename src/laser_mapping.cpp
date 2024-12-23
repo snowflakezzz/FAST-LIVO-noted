@@ -88,7 +88,9 @@ void LaserMapping::Run(){
         if (img_en) {
             euler_cur = RotMtoEuler(state.rot_end);
             // step4.1 视觉追踪、残差构建、state位姿优化更新
+            std::unique_lock<mutex> lck(m_img);
             lidar_selector->detect(LidarMeasures.measures.back().img, pcl_wait_pub);
+            lck.unlock();
             int size_sub = lidar_selector->sub_map_cur_frame_.size();
 
             // step4.2 点云可视化
@@ -745,6 +747,8 @@ bool LaserMapping::InitROS(ros::NodeHandle &nh){
             ("/aft_mapped_to_init", 10);
     pubPath          = nh.advertise<nav_msgs::Path> 
             ("/path", 10);
+    if(loop_en) // 回环检测结果可视化
+        pubLoopConstraintEdge = nh.advertise<visualization_msgs::MarkerArray>("/loop_closure_constraints", 10);
     return true;
 }
 
@@ -1014,6 +1018,8 @@ void LaserMapping::loop_detect(){
     size_t cloudInd = 0;
     size_t keyCloudInd = 0;
     pcl::PointCloud<pcl::PointXYZI>::Ptr key_cloud(new pcl::PointCloud<pcl::PointXYZI>);
+    bool first_img = true;
+    cv::Mat img_cur; SE3 Tfw;
 
     while(1){
         std::unique_lock<std::mutex> lock(m_loop_rady);
@@ -1024,15 +1030,45 @@ void LaserMapping::loop_detect(){
         pcl::copyPointCloud(*pcl_wait_pub, *current_cloud);
         lock.unlock();
 
+        if(first_img){
+            std::unique_lock<std::mutex> lck(m_img);
+            img_cur = lidar_selector->img_rgb;
+            Tfw = lidar_selector->new_frame_->T_f_w_;
+            lck.unlock();
+            first_img = false;
+
+            cv::Mat aux;
+            cv::cvtColor(img_cur, aux, cv::COLOR_RGB2GRAY);
+            cv::GaussianBlur(aux, img_cur, cv::Size(9,9), 2.f, 2.f);
+        }
+
         *key_cloud += *current_cloud;
 
         // 累积目标数目帧为一个关键帧
         if (cloudInd % p_stdloop->config_setting_.sub_frame_num_ == 0 && cloudInd != 0){
 
             // step1 描述子提取
+            double t0,t1,t2,t3,t4,t5; //,match_start, solve_start, svd_time;
+            t0 = omp_get_wtime();
             std::vector<STDesc> stds_vec;
             p_stdloop->GenerateSTDescs(key_cloud, stds_vec);
             key_cloud->clear();
+            t1 = omp_get_wtime();
+
+            #ifdef USE_IMG
+            // 提取三角形角点描述子
+            // cv::Ptr<cv::DescriptorExtractor> extractor = cv::BRISK::create(); 太慢了
+            for_each(stds_vec.begin(), stds_vec.end(), [&](STDesc &std_i){
+                V2D pc_A(lidar_selector->new_frame_->f2c(Tfw * std_i.vertex_A_));
+                p_stdloop->GenerateBinary(img_cur, pc_A, std_i.des_A_);
+                V2D pc_B(lidar_selector->new_frame_->f2c(Tfw * std_i.vertex_B_));
+                p_stdloop->GenerateBinary(img_cur, pc_B, std_i.des_B_);
+                V2D pc_C(lidar_selector->new_frame_->f2c(Tfw * std_i.vertex_C_));
+                p_stdloop->GenerateBinary(img_cur, pc_C, std_i.des_C_);
+            });
+            first_img = true;
+            t2 = omp_get_wtime();
+            #endif
 
             // step2 回环检测
             std::pair<int, double> search_result(-1, 0);        // 搜索到的帧id，及回环分数
@@ -1041,6 +1077,9 @@ void LaserMapping::loop_detect(){
             loop_transform.second = Eigen::Matrix3d::Identity();
             std::vector<std::pair<STDesc, STDesc>> loop_std_pair;   // 匹配上的三角描述子
             if (keyCloudInd > p_stdloop->config_setting_.skip_near_num_) {
+                std::fstream fout(DEBUG_FILE_DIR("loop_result.txt"), std::ios::app);
+                fout << "test one " << std::endl;
+                fout.close();
                 p_stdloop->SearchLoop(stds_vec, search_result, loop_transform,
                                         loop_std_pair);
             }
@@ -1054,15 +1093,59 @@ void LaserMapping::loop_detect(){
                     << search_result.first << ", score:" << search_result.second
                     << std::endl;
                 fout.close();
+                
+                // step4.1 通过关键帧计算匹配帧
+                int sub_frame_num = p_stdloop->config_setting_.sub_frame_num_;
+                for(size_t j = 1; j <= sub_frame_num; ++j){
+                    int src_frame_id = cloudInd + j - sub_frame_num;
+                }
             }
-
             ++keyCloudInd;
         }
-
         cloudInd++;
     }
 }
 
+// void LaserMapping::publish_loop_marker(std::vector<std::pair<int, int>> &loop_container)
+// {
+//     if(loop_container.empty())
+//         return;
+    
+//     visualzation_msgs::MarkerArray marker_array;
+//     visualzation_msgs::Marker markerNode;
+//     markerNode.header.frame_id = "camera_init";
+//     markerNode.action = visualzation_msgs::Marker::ADD;
+//     markerNode.type = visualzation_msgs::Marker::SPHERE_LIST;
+//     markerNode.ns = "loop_nodes";
+//     markerNode.id = 0;
+//     markerNode.pose.orientation.w = 1;
+//     markerNode.scale.x = 0.3;
+//     markerNode.scale.y = 0.3;
+//     markerNode.scale.z = 0.3;
+//     markerNode.color.r = 0;
+//     markerNode.color.g = 0.8;
+//     markerNode.color.b = 1;
+//     markerNode.color.a = 1;
+
+//     // 闭环边
+//     visualization_msgs::Marker markerEdge;
+//     markerEdge.header.frame_id = "camera_init";
+//     markerEdge.action = visualization_msgs::Marker::ADD;
+//     markerEdge.type = visualization_msgs::Marker::LINE_LIST;
+//     markerEdge.ns = "loop_edges";
+//     markerEdge.id = 1;
+//     markerEdge.pose.orientation.w = 1;
+//     markerEdge.scale.x = 0.1;
+//     markerEdge.color.r = 0.9;
+//     markerEdge.color.g = 0.9;
+//     markerEdge.color.b = 0;
+//     markerEdge.color.a = 1;
+    
+//     // 没存pose 还不好可视化！
+//     // for(auto &loop_pair : loop_container)
+    
+//     pubLoopConstraintEdge.publish(marker_array);
+// }
 
 void LaserMapping::publish_frame_world_rgb()
 {

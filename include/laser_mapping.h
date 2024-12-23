@@ -15,7 +15,7 @@
 #include "IMU_Processing.h"
 #include <nav_msgs/Odometry.h>
 #include <nav_msgs/Path.h>
-#include <visualization_msgs/Marker.h>
+#include <visualization_msgs/MarkerArray.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
@@ -163,8 +163,6 @@ private:
 
     V3D euler_cur;
     V3D position_last;
-    Eigen::Matrix3d Rcl;
-    Eigen::Vector3d Pcl;
 
     //estimator inputs and output;
     LidarMeasureGroup LidarMeasures;
@@ -192,6 +190,7 @@ private:
     ros::Publisher pubOdomAftMapped;
     ros::Publisher pubPath;
     image_transport::Publisher img_pub;
+    ros::Publisher pubLoopConstraintEdge;
 
     // 滤波优化相关参数
     StatesGroup state;                         // 系统状态量

@@ -87,3 +87,5 @@ std:
     normal_threshold: 0.2
     dis_threshold: 0.5
     icp_threshold: 0.4
+
+    pattern_file: "/home/zxq/Documents/02base/fastlivo/src/FAST-LIVO-noted/include/STD/brief_pattern.yml"

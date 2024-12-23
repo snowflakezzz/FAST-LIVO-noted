@@ -26,7 +26,7 @@
 #include <opencv2/opencv.hpp>
 #include <boost/dynamic_bitset.hpp>
 
-typedef boost::dynamic_bitset<> bitset;
+typedef boost::dynamic_bitset<> bit_set;
 #endif
 
 typedef struct ConfigSetting {
@@ -63,6 +63,9 @@ typedef struct ConfigSetting {
   double normal_threshold_ = 0.1;
   double dis_threshold_ = 0.3;
 
+  // 生成brief随机点对 vins-mono中设计的
+  std::vector<int> m_x1, m_x2;
+  std::vector<int> m_y1, m_y2;
 } ConfigSetting;
 
 // Structure for Stabel Triangle Descriptor
@@ -85,9 +88,10 @@ typedef struct STDesc {
   Eigen::Vector3d vertex_attached_;     // 三角形三个角点在特征点提取时包含的投影点数量 todo：存brief描述子
 
   #ifdef USE_IMG
-  bitset des_A_;
-  bitset des_B_;
-  bitset des_C_;
+  bit_set des_A_;
+  bit_set des_B_;
+  bit_set des_C_;
+  // cv::Mat describer_;     // 每行为一个特征点描述子
   #endif
 } STDesc;
 
@@ -241,6 +245,10 @@ void publish_std_pairs(
 
 bool attach_greater_sort(std::pair<double, int> a, std::pair<double, int> b);
 
+#ifdef USE_IMG
+inline int hamming_distance(const bit_set &a, const bit_set &b);
+#endif
+
 struct PlaneSolver {
   PlaneSolver(Eigen::Vector3d curr_point_, Eigen::Vector3d curr_normal_,
               Eigen::Vector3d target_point_, Eigen::Vector3d target_normal_)
@@ -328,7 +336,7 @@ public:
 
   #ifdef USE_IMG
   // compute brief for STDvec vertex
-  void GenerateBinary(std::vector<STDesc> &stds_vec);
+  void GenerateBinary(const cv::Mat &img, Eigen::Vector2d &p_cam, bit_set &out);
   #endif
 private:
   /*Following are sub-processing functions*/
