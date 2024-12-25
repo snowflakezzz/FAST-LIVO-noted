@@ -99,10 +99,10 @@ void read_parameters(ros::NodeHandle &nh, ConfigSetting &config_setting) {
   cv::FileStorage fs(pattern_file.c_str(), cv::FileStorage::READ);
   if(!fs.isOpened()) throw std::string("can not open pattern file") + pattern_file;
 
-  fs["x1"] >> config_setting.m_x1;
-  fs["x2"] >> config_setting.m_x2;
-  fs["y1"] >> config_setting.m_y1;
-  fs["y2"] >> config_setting.m_y2;
+  fs["x1"] >> config_setting.m_x1; config_setting.m_x1.shrink_to_fit();
+  fs["x2"] >> config_setting.m_x2; config_setting.m_x2.shrink_to_fit();
+  fs["y1"] >> config_setting.m_y1; config_setting.m_y1.shrink_to_fit();
+  fs["y2"] >> config_setting.m_y2; config_setting.m_y2.shrink_to_fit();
   #endif
 
   std::cout << "Sucessfully load parameters:" << std::endl;
@@ -117,50 +117,6 @@ void read_parameters(ros::NodeHandle &nh, ConfigSetting &config_setting) {
             << std::endl;
   std::cout << "maximum corners size: " << config_setting.maximum_corner_num_
             << std::endl;
-}
-
-void load_pose_with_time(
-    const std::string &pose_file,
-    std::vector<std::pair<Eigen::Vector3d, Eigen::Matrix3d>> &poses_vec,
-    std::vector<double> &times_vec) {
-  times_vec.clear();
-  poses_vec.clear();
-  std::ifstream fin(pose_file);
-  std::string line;
-  Eigen::Matrix<double, 1, 7> temp_matrix;
-  while (getline(fin, line)) {
-    std::istringstream sin(line);
-    std::vector<std::string> Waypoints;
-    std::string info;
-    int number = 0;
-    while (getline(sin, info, ' ')) {
-      if (number == 0) {
-        double time;
-        std::stringstream data;
-        data << info;
-        data >> time;
-        times_vec.push_back(time);
-        number++;
-      } else {
-        double p;
-        std::stringstream data;
-        data << info;
-        data >> p;
-        temp_matrix[number - 1] = p;
-        if (number == 7) {
-          Eigen::Vector3d translation(temp_matrix[0], temp_matrix[1],
-                                      temp_matrix[2]);
-          Eigen::Quaterniond q(temp_matrix[6], temp_matrix[3], temp_matrix[4],
-                               temp_matrix[5]);
-          std::pair<Eigen::Vector3d, Eigen::Matrix3d> single_pose;
-          single_pose.first = translation;
-          single_pose.second = q.toRotationMatrix();
-          poses_vec.push_back(single_pose);
-        }
-        number++;
-      }
-    }
-  }
 }
 
 double time_inc(std::chrono::_V2::system_clock::time_point &t_end,
@@ -186,9 +142,11 @@ bool attach_greater_sort(std::pair<double, int> a, std::pair<double, int> b) {
   return (a.first > b.first);
 }
 
+#ifdef USE_IMG
 inline int hamming_distance(const bit_set &a, const bit_set &b){
   return (a^b).count();
 }
+#endif
 
 void publish_std_pairs(
     const std::vector<std::pair<STDesc, STDesc>> &match_std_pairs,
@@ -331,6 +289,9 @@ void STDescManager::GenerateBinary(const cv::Mat &img, Eigen::Vector2d &p_cam, b
   out.resize(256);
   out.reset();
 
+  // cv::Mat img_line;
+  // img_line = img.clone();
+
   for(unsigned int i = 0; i < config_setting_.m_x1.size(); ++i)
   {
     x1 = (int)(p_cam(0) + config_setting_.m_x1[i]);
@@ -345,8 +306,10 @@ void STDescManager::GenerateBinary(const cv::Mat &img, Eigen::Vector2d &p_cam, b
       {
         out.set(i);
       }
+      // cv::line(img_line, cv::Point(x1, y1), cv::Point(x2, y2), cv::Scalar(0, 255, 0), 1);
     }
   }
+  // cv::imwrite("/home/zxq/Documents/02base/fastlivo/src/FAST-LIVO-noted/Log/brief.png", img_line);
 }
 #endif
 
@@ -450,9 +413,6 @@ void STDescManager::AddSTDescs(const std::vector<STDesc> &stds_vec) {
     position.x = (int)(single_std.side_length_[0] + 0.5);
     position.y = (int)(single_std.side_length_[1] + 0.5);
     position.z = (int)(single_std.side_length_[2] + 0.5);
-    // position.a = (int)(single_std.angle_[0]);
-    // position.b = (int)(single_std.angle_[1]);
-    // position.c = (int)(single_std.angle_[2]);
     auto iter = data_base_.find(position);
     if (iter != data_base_.end()) {
       data_base_[position].push_back(single_std);
@@ -1110,7 +1070,7 @@ void STDescManager::candidate_selector(const std::vector<STDesc> &stds_vec, std:
                                             + hamming_distance(src_std.des_C_, data_base_[position][j].des_C_);
                 vertex_attach_diff /= 3;
 
-                if (vertex_attach_diff > 200) {
+                if (vertex_attach_diff < 80) {    // vins-mono中用的80
                   final_match_cnt++;
                   useful_match[i] = true;
                   useful_match_position[i].push_back(position);
@@ -1199,7 +1159,7 @@ void STDescManager::candidate_selector(const std::vector<STDesc> &stds_vec, std:
       }
       candidate_matcher_vec.push_back(match_triangle_list);
     } else {
-      break;
+      // break;
     }
   }
 }

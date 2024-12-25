@@ -46,7 +46,7 @@ public:
   SE3                           T_f_w_;                 //!< Transform (f)rame to (w)orld.
   ImgPyr                        img_pyr_;               //!< Image Pyramid.
   Features                      fts_;                   //!< List of features in the image.
-  vector<FeaturePtr>            key_pts_;               //!< Five features and associated 3D points which are used to detect if two frames have overlapping field of view.
+  vector<FeaturePtr>            key_pts_;               //!< 将图像划分为四个区域，各区域选离中心最远的特征点，加上离中心最近的特征点Five features and associated 3D points which are used to detect if two frames have overlapping field of view.
   bool                          is_keyframe_;           //!< Was this frames selected as keyframe
 
   Frame(vk::AbstractCamera* cam, const cv::Mat& img);

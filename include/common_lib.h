@@ -18,6 +18,7 @@
 #include <sophus/se3.h>
 #include <boost/shared_ptr.hpp>
 #include <unordered_map>
+#include <gtsam/geometry/Pose3.h>
 
 using namespace std;
 using namespace Eigen;
@@ -106,6 +107,10 @@ inline Eigen::Matrix3d skewd(const Eigen::Vector3d& x) {
   skew(2, 1) = x[0];
 
   return skew;
+}
+
+inline gtsam::Pose3 trans2gtsamPose3(Eigen::Matrix3d &R, Eigen::Vector3d &t){
+    return gtsam::Pose3(gtsam::Rot3(R), gtsam::Point3(t(0), t(1), t(2)));
 }
 }
 

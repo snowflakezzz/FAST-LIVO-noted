@@ -35,10 +35,8 @@ struct Feature
   int id_;
   FeatureType type;     //!< Type can be corner or edgelet.
   Frame* frame;         //!< Pointer to frame in which the feature was detected.
-  cv::Mat img;
-  vector<cv::Mat> ImgPyr;
   Vector2d px;          //!< Coordinates in pixels on pyramid level 0.
-  Vector3d f;           //!< Unit-bearing vector of the feature.
+  Vector3d f;           //!< Unit-bearing vector of the feature. 计算仿射变换时会用到
   int level;            //!< Image pyramid level where feature was extracted.
   PointPtr point;         //!< Pointer to 3D point which corresponds to the feature.
   Vector2d grad;        //!< Dominant gradient direction for edglets, normalized.

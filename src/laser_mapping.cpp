@@ -88,9 +88,7 @@ void LaserMapping::Run(){
         if (img_en) {
             euler_cur = RotMtoEuler(state.rot_end);
             // step4.1 视觉追踪、残差构建、state位姿优化更新
-            std::unique_lock<mutex> lck(m_img);
             lidar_selector->detect(LidarMeasures.measures.back().img, pcl_wait_pub);
-            lck.unlock();
             int size_sub = lidar_selector->sub_map_cur_frame_.size();
 
             // step4.2 点云可视化
@@ -119,6 +117,7 @@ void LaserMapping::Run(){
             euler_cur = RotMtoEuler(state.rot_end);
 
             if(bgnss_en) p_gnss->input_path(LidarMeasures.last_update_time, state.pos_end);
+            this->save_keyframe_factor();
         }
         return;
     }
@@ -1006,6 +1005,12 @@ void LaserMapping::readParameters(ros::NodeHandle &nh)
     p_imu->set_gyr_bias_cov(V3D(0.00001, 0.00001, 0.00001));
     p_imu->set_acc_bias_cov(V3D(0.00001, 0.00001, 0.00001));
 
+    // step4 后端优化相关参数
+    gtsam::ISAM2Params parameters;
+    parameters.relinearizeThreshold = 0.01;
+    parameters.relinearizeSkip = 1;
+    isam = new gtsam::ISAM2(parameters);
+
     // 运行相关参数设置
     downSizeFilterSurf.setLeafSize(filter_size_surf_min, filter_size_surf_min, filter_size_surf_min);
     downSizeFilterMap.setLeafSize(filter_size_map_min, filter_size_map_min, filter_size_map_min);
@@ -1014,12 +1019,90 @@ void LaserMapping::readParameters(ros::NodeHandle &nh)
     path.header.frame_id ="camera_init";
 }
 
+bool LaserMapping::save_keyframe(){
+    frame_count_++;
+    if (keyframe_count_ == 0){
+        return true;
+    }
+
+    V3D transBetween = state.pos_end - last_state.pos_end;
+    M3D rotBetween = state.rot_end.transpose() * last_state.rot_end;
+    V3D rpy = rotBetween.eulerAngles(2, 1, 0);
+
+    if(transBetween.norm() < 1.0 && abs(rpy(0)) < 0.2 && abs(rpy(1)) < 0.2 && abs(rpy(2)) < 0.2)
+        return false;
+
+    return true;
+}
+
+void LaserMapping::add_odofactor(){
+    if (keyframe_count_ == 0){
+        // 添加第一帧初始化先验因子
+        gtsam::noiseModel::Diagonal::shared_ptr priorNoise = gtsam::noiseModel::Diagonal::Variances(
+            (gtsam::Vector(6) << 1e-12, 1e-12, 1e-12, 1e-12, 1e-12, 1e-12).finished());
+        gtSAMgraph.add(gtsam::PriorFactor<gtsam::Pose3>(0, common::trans2gtsamPose3(state.rot_end, state.pos_end), priorNoise));
+        initialEstimate.insert(0, common::trans2gtsamPose3(state.rot_end, state.pos_end));
+    } else{
+        gtsam::noiseModel::Diagonal::shared_ptr odometryNoise = gtsam::noiseModel::Diagonal::Variances(
+            (gtsam::Vector(6) << 1e-6, 1e-6, 1e-6, 1e-4, 1e-4, 1e-4).finished());
+        gtsam::Pose3 poseFrom = common::trans2gtsamPose3(last_state.rot_end, last_state.pos_end);
+        gtsam::Pose3 poseTo = common::trans2gtsamPose3(state.rot_end, state.pos_end);
+        gtSAMgraph.add(gtsam::BetweenFactor<gtsam::Pose3>(keyframe_count_ - 1, keyframe_count_, poseFrom.between(poseTo), odometryNoise));
+        initialEstimate.insert(keyframe_count_, poseTo);
+    }
+}
+
+void LaserMapping::add_loopfactor(){
+    if (loopindex_buffer.empty())
+        return;
+    
+    for(int i=0; i<loopindex_buffer.size(); i++){
+        int index_from = loopindex_buffer[i].first;
+        int index_to = loopindex_buffer[i].second;
+        gtsam::Pose3 poseBetween = loop_pose[i];
+        gtsam::noiseModel::Diagonal::shared_ptr noisebetween = loop_noise[i];
+        gtSAMgraph.add(gtsam::BetweenFactor<gtsam::Pose3>(index_from, index_to, poseBetween, noisebetween));
+    }
+
+    loopindex_buffer.clear();
+    loop_pose.clear();
+    loop_noise.clear();
+    bloop_closed = true;
+}
+
+void LaserMapping::save_keyframe_factor(){
+    // step1 筛选关键帧
+    if (this->save_keyframe() == false)
+        return;
+    
+    this->add_odofactor();
+
+    if(loop_en) this->add_loopfactor();
+    
+    if(keyframe_count_ != 0){
+        cout << gtSAMgraph.empty() << endl;
+        isam->update(gtSAMgraph, initialEstimate);
+        isam->update();
+        if (bloop_closed){
+            isam->update();
+            isam->update();
+            isam->update();
+            isam->update();
+            isam->update();
+        }
+        gtSAMgraph.resize(0);
+        initialEstimate.clear();
+    }
+
+    last_state = state;
+    // keyframe_id[frame_count_] = keyframe_count_;
+    keyframe_count_++;
+}
+
 void LaserMapping::loop_detect(){
     size_t cloudInd = 0;
     size_t keyCloudInd = 0;
     pcl::PointCloud<pcl::PointXYZI>::Ptr key_cloud(new pcl::PointCloud<pcl::PointXYZI>);
-    bool first_img = true;
-    cv::Mat img_cur; SE3 Tfw;
 
     while(1){
         std::unique_lock<std::mutex> lock(m_loop_rady);
@@ -1029,18 +1112,6 @@ void LaserMapping::loop_detect(){
         pcl::PointCloud<pcl::PointXYZI>::Ptr current_cloud(new pcl::PointCloud<pcl::PointXYZI>);
         pcl::copyPointCloud(*pcl_wait_pub, *current_cloud);
         lock.unlock();
-
-        if(first_img){
-            std::unique_lock<std::mutex> lck(m_img);
-            img_cur = lidar_selector->img_rgb;
-            Tfw = lidar_selector->new_frame_->T_f_w_;
-            lck.unlock();
-            first_img = false;
-
-            cv::Mat aux;
-            cv::cvtColor(img_cur, aux, cv::COLOR_RGB2GRAY);
-            cv::GaussianBlur(aux, img_cur, cv::Size(9,9), 2.f, 2.f);
-        }
 
         *key_cloud += *current_cloud;
 
@@ -1058,6 +1129,11 @@ void LaserMapping::loop_detect(){
             #ifdef USE_IMG
             // 提取三角形角点描述子
             // cv::Ptr<cv::DescriptorExtractor> extractor = cv::BRISK::create(); 太慢了
+
+            cv::Mat aux;
+            cv::cvtColor(img_cur, aux, cv::COLOR_RGB2GRAY);
+            cv::GaussianBlur(aux, img_cur, cv::Size(9,9), 2.f, 2.f);
+
             for_each(stds_vec.begin(), stds_vec.end(), [&](STDesc &std_i){
                 V2D pc_A(lidar_selector->new_frame_->f2c(Tfw * std_i.vertex_A_));
                 p_stdloop->GenerateBinary(img_cur, pc_A, std_i.des_A_);
@@ -1077,28 +1153,60 @@ void LaserMapping::loop_detect(){
             loop_transform.second = Eigen::Matrix3d::Identity();
             std::vector<std::pair<STDesc, STDesc>> loop_std_pair;   // 匹配上的三角描述子
             if (keyCloudInd > p_stdloop->config_setting_.skip_near_num_) {
-                std::fstream fout(DEBUG_FILE_DIR("loop_result.txt"), std::ios::app);
-                fout << "test one " << std::endl;
-                fout.close();
+                t0 = omp_get_wtime();
                 p_stdloop->SearchLoop(stds_vec, search_result, loop_transform,
                                         loop_std_pair);
+                t1 = omp_get_wtime();
+                // std::fstream fout(DEBUG_FILE_DIR("loop_result.txt"), std::ios::app);
+                // fout << "time: " << (t1-t0) << std::endl;
+                // fout.close();
             }
 
             // step3 将三角特征添加到数据库中
             p_stdloop->AddSTDescs(stds_vec);
 
             if(search_result.first > 0){
+                int match_frame = search_result.first;
+
                 std::fstream fout(DEBUG_FILE_DIR("loop_result.txt"), std::ios::app);
                 fout << "[Loop Detection] triggle loop: " << keyCloudInd << "--"
-                    << search_result.first << ", score:" << search_result.second
+                    << match_frame << ", score:" << search_result.second
                     << std::endl;
                 fout.close();
                 
                 // step4.1 通过关键帧计算匹配帧
                 int sub_frame_num = p_stdloop->config_setting_.sub_frame_num_;
+                int src_id, match_id;
                 for(size_t j = 1; j <= sub_frame_num; ++j){
-                    int src_frame_id = cloudInd + j - sub_frame_num;
+                    src_id = cloudInd + j - sub_frame_num;
+                    if(keyframe_id.count(src_id)) break;
                 }
+                src_id = keyframe_id[src_id];
+
+                for(size_t j = 1; j <= sub_frame_num; ++j){
+                    match_id = match_frame * sub_frame_num + j;
+                    if(keyframe_id.count(match_id)) break;
+                }
+                match_id = keyframe_id[match_id];
+
+                if(keyframe_id.count(src_id) || keyframe_id.count(match_id)) continue;
+
+                // todo: 使用DBOW/视觉帧间配准？查看两帧之间匹配是否准确及帧间变化量
+                cv::Mat img_cur = lidar_selector->imgs_[src_id];
+                cv::Mat img_match = lidar_selector->imgs_[match_id];
+                
+
+                gtsam::Vector Vector6(6);
+                Vector6 << search_result.second, search_result.second, search_result.second,
+                        search_result.second, search_result.second, search_result.second;
+                gtsam::noiseModel::Diagonal::shared_ptr constraint_noise = gtsam::noiseModel::Diagonal::Variances(Vector6);
+                
+                // todo: 计算回环约束后，计算相对位姿
+
+
+                loopindex_buffer.push_back(std::make_pair(src_id, match_id));
+                // loop_pose.push_back();
+                loop_noise.push_back(constraint_noise);
             }
             ++keyCloudInd;
         }

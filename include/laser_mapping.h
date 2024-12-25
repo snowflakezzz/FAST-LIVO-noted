@@ -43,6 +43,17 @@
 #include "ikd-Tree/ikd_Tree.h"
 #endif
 
+// gtsam
+#include <gtsam/geometry/Rot3.h>
+// #include <gtsam/geometry/Pose3.h>
+#include <gtsam/nonlinear/NonlinearFactorGraph.h>
+#include <gtsam/nonlinear/ISAM2.h>
+#include <gtsam/nonlinear/Values.h>
+#include <gtsam/nonlinear/Marginals.h>
+#include <gtsam/slam/PriorFactor.h>
+#include <gtsam/slam/BetweenFactor.h>
+#include <gtsam/inference/Factor.h>
+
 #define INIT_TIME           (0.5)
 #define MAXN                (360000)
 #define PUBFRAME_PERIOD     (20)
@@ -89,6 +100,12 @@ private:
     void publish_frame_world();
     void publish_effect_world();
     void publish_path();
+
+    // gtsam
+    void save_keyframe_factor();
+    void add_loopfactor();
+    void add_odofactor();
+    bool save_keyframe();
 
     /// modules
     IVoxType::Options ivox_options_;
@@ -194,7 +211,8 @@ private:
 
     // 滤波优化相关参数
     StatesGroup state;                         // 系统状态量
-    StatesGroup state_propagat;                 // 上一次优化后的状态量
+    StatesGroup state_propagat;                // 上一次优化后的状态量
+    StatesGroup last_state;
 
     bool nearest_search_en;                     // 判断是否要进行最近临点搜索
 
@@ -203,5 +221,17 @@ private:
     // 多线程相关参数
     std::condition_variable loop_cv;
     std::mutex m_loop_rady;
+    vector<pair<int, int>> loopindex_buffer;
+    vector<gtsam::Pose3> loop_pose;
+    vector<gtsam::noiseModel::Diagonal::shared_ptr> loop_noise;
+
+    // 回环及gnss融合优化
+    gtsam::NonlinearFactorGraph gtSAMgraph;
+    gtsam::ISAM2 *isam;
+    gtsam::Values initialEstimate;
+    int keyframe_count_ = 0;
+    int frame_count_ = 0;
+    unordered_map<int, int> keyframe_id;         // 存储正常帧对应的关键帧id
+    bool bloop_closed = false;
 };
 #endif

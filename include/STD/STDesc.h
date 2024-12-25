@@ -226,11 +226,6 @@ public:
 void down_sampling_voxel(pcl::PointCloud<pcl::PointXYZI> &pl_feat,
                          double voxel_size);
 
-void load_pose_with_time(
-    const std::string &pose_file,
-    std::vector<std::pair<Eigen::Vector3d, Eigen::Matrix3d>> &poses_vec,
-    std::vector<double> &times_vec);
-
 void read_parameters(ros::NodeHandle &nh, ConfigSetting &config_setting);
 
 double time_inc(std::chrono::_V2::system_clock::time_point &t_end,

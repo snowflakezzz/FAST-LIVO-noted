@@ -42,7 +42,7 @@ public:
   static int                  point_counter_;           //!< Counts the number of created points. Used to set the unique id.
   int                         id_;                      //!< Unique ID of the point.
   Vector3d                    pos_;                     //!< 3d pos of the point in the world coordinate frame.
-  float x, y, z, intensity;
+  float                       x, y, z, intensity;
   Vector3d                    normal_;                  //!< Surface normal at point.
   Matrix3d                    normal_information_;      //!< Inverse covariance matrix of normal estimation.
   bool                        normal_set_;              //!< Flag whether the surface normal was estimated or not.

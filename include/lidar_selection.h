@@ -30,7 +30,7 @@ class LidarSelector {
     int* grid_num;
     int* map_index;                               // 格网索引
     float* map_dist;                              // 当前帧各个格网中到光心最近的地图点
-    float* map_value;
+    float* map_value;                             // 存储格网shiTomasi角点评分分数
     float* patch_cache;
     float* patch_with_border_;
     int width, height, grid_n_width, grid_n_height, length;   // length格网个数
@@ -43,14 +43,13 @@ class LidarSelector {
     double img_point_cov, outlier_threshold, ncc_thre;
     size_t n_meas_;                //!< Number of measurements
     deque< PointPtr > map_cur_frame_;
-    deque< PointPtr > sub_map_cur_frame_;
+    deque< PointPtr > sub_map_cur_frame_;         // 用于可视化
     double computeH, ekf_time;
     double ave_total = 0.0;
     int frame_count = 0;
 
     Matrix<double, DIM_STATE, DIM_STATE> G, H_T_H;
     MatrixXd H_sub, K;
-    cv::flann::Index Kdtree;
 
     LidarSelector(const int grid_size, SparseMap* sparse_map);
 
@@ -63,7 +62,6 @@ class LidarSelector {
     void FeatureAlignment(cv::Mat img);
     void set_extrinsic(const V3D &transl, const M3D &rot);
     void init();
-    void getpatch(cv::Mat img, V3D pg, float* patch_tmp, int level);
     void getpatch(cv::Mat img, V2D pc, float* patch_tmp, int level);
     void dpi(V3D p, MD(2,3)& J);
     float UpdateState(cv::Mat img, float total_residual, int level);
@@ -72,8 +70,6 @@ class LidarSelector {
     void ComputeJ(cv::Mat img);
     void reset_grid();
     void addObservation(cv::Mat img);
-    void reset();
-    bool initialization(FramePtr cur_frame, PointCloudXYZI::Ptr pg);   
     void createPatchFromPatchWithBorder(float* patch_with_border, float* patch_ref);
     void getWarpMatrixAffine(
       const vk::AbstractCamera& cam,
@@ -108,24 +104,17 @@ class LidarSelector {
       const int halfpatch_size,
       float* patch);
     
-    PointCloudXYZI::Ptr Map_points;
-    PointCloudXYZI::Ptr Map_points_output;
-    PointCloudXYZI::Ptr pg_down;
     pcl::VoxelGrid<PointType> downSizeFilter;
     unordered_map<VOXEL_KEY, VOXEL_POINTS*> feat_map;     // 视觉点云地图
     unordered_map<VOXEL_KEY, float> sub_feat_map;         // 记录各个voxel块中点的数量
     unordered_map<int, Warp*> Warp_map;                   // 记录每个特征点对应的参考帧reference frame id, A_cur_ref and search_level
 
-    vector<VOXEL_KEY> occupy_postions;
-    set<VOXEL_KEY> sub_postion;
     vector<PointPtr> voxel_points_;
     vector<V3D> add_voxel_points_;
 
-
     cv::Mat img_cp, img_rgb;
-    std::vector<FramePtr> overlap_kfs_;
-    FramePtr new_frame_;                        // 新图像观测帧
-    FramePtr last_kf_;
+    unordered_map<int, cv::Mat> imgs_;                     // 存储历史图像，用于patch块去畸变
+    FramePtr new_frame_;                                   // 新图像观测帧
     Map map_;
     enum Stage {
       STAGE_FIRST_FRAME,

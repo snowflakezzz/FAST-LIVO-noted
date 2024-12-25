@@ -83,6 +83,7 @@ void Frame::checkKeyPoints(FeaturePtr ftr)
   const int cv = cam_->height()/2;
 
   // center pixel
+  // step1 选择距离中心更近的点为标识点0
   if(key_pts_[0] == nullptr)
     key_pts_[0] = ftr;
 
@@ -90,6 +91,7 @@ void Frame::checkKeyPoints(FeaturePtr ftr)
         < std::max(std::fabs(key_pts_[0]->px[0]-cu), std::fabs(key_pts_[0]->px[1]-cv)))
     key_pts_[0] = ftr;
 
+  // step2 选择在右下区域，距离中心更远的点为标识点1
   if(ftr->px[0] >= cu && ftr->px[1] >= cv)
   {
     if(key_pts_[1] == nullptr)
@@ -99,6 +101,7 @@ void Frame::checkKeyPoints(FeaturePtr ftr)
       key_pts_[1] = ftr;
   }
 
+  // step3 选择在右上区域，距离中心更远的点为标识点2
   if(ftr->px[0] >= cu && ftr->px[1] < cv)
   {
     if(key_pts_[2] == nullptr)
@@ -110,6 +113,7 @@ void Frame::checkKeyPoints(FeaturePtr ftr)
       key_pts_[2] = ftr;
   }
 
+  // step4 选择在左下区域，距离中心更远的点为标识点3
   if(ftr->px[0] < cu && ftr->px[1] < cv)
   {
     if(key_pts_[3] == nullptr)
@@ -119,6 +123,7 @@ void Frame::checkKeyPoints(FeaturePtr ftr)
       key_pts_[3] = ftr;
   }
 
+  // step5 选择在左上区域，距离中心更远的点为标识点4
   if(ftr->px[0] < cu && ftr->px[1] >= cv)  
   // if(ftr->px[0] < cv && ftr->px[1] >= cv)
   {

@@ -57,8 +57,7 @@ void LidarSelector::init()
     grid_n_width = static_cast<int>(width/grid_size);
     grid_n_height = static_cast<int>(height/grid_size);
     length = grid_n_width * grid_n_height;                  // 图像中划分的格网个数
-    // fx = cam->errorMultiplier2();                        // 获取焦距
-    // fy = cam->errorMultiplier() / (4. * fx);
+
     grid_num = new int[length];
     map_index = new int[length];
     map_value = new float[length];
@@ -74,15 +73,13 @@ void LidarSelector::init()
     patch_size_half = static_cast<int>(patch_size/2);
     patch_cache = new float[patch_size_total];
     stage_ = STAGE_FIRST_FRAME;
-    pg_down.reset(new PointCloudXYZI());
-    Map_points.reset(new PointCloudXYZI());
-    Map_points_output.reset(new PointCloudXYZI());
 }
 
 void LidarSelector::reset_grid()
 {
     memset(grid_num, TYPE_UNKNOWN, sizeof(int)*length);
     memset(map_index, 0, sizeof(int)*length);
+    memset(map_value, 0, sizeof(float)*length);
     fill_n(map_dist, length, 10000);
     std::vector<PointPtr>(length).swap(voxel_points_);
     std::vector<V3D>(length).swap(add_voxel_points_);
@@ -183,9 +180,6 @@ void LidarSelector::addSparseMap(cv::Mat img, PointCloudXYZI::Ptr pg)
             PointPtr pt_new(new Point(pt));
             Vector3d f = cam->cam2world(pc);
             FeaturePtr ftr_new(new Feature(patch, pc, f, new_frame_->T_f_w_, map_value[i], 0));
-            ftr_new->img = new_frame_->img_pyr_[0];
-            // ftr_new->ImgPyr.resize(5);
-            // for(int i=0;i<5;i++) ftr_new->ImgPyr[i] = new_frame_->img_pyr_[i];
             ftr_new->id_ = new_frame_->id_;
 
             pt_new->addFrameRef(ftr_new);
@@ -195,13 +189,7 @@ void LidarSelector::addSparseMap(cv::Mat img, PointCloudXYZI::Ptr pg)
         }
     }
 
-    // double t_b3 = omp_get_wtime() - t0;
-
     printf("[ VIO ]: Add %d 3D points.\n", add);
-    // printf("pg.size: %d \n", pg->size());
-    // printf("B1. : %.6lf \n", t_b1);
-    // printf("B2. : %.6lf \n", t_b2);
-    // printf("B3. : %.6lf \n", t_b3);
 }
 
 void LidarSelector::AddPoint(PointPtr pt_new)
@@ -274,10 +262,6 @@ void LidarSelector::warpAffine(
     printf("Affine warp is NaN, probably camera has no translation\n"); // TODO
     return;
   }
-//   Perform the warp on a larger patch.
-//   float* patch_ptr = patch;
-//   const Vector2f px_ref_pyr = px_ref.cast<float>() / (1<<level_ref) / (1<<pyramid_level);
-//   const Vector2f px_ref_pyr = px_ref.cast<float>() / (1<<level_ref);
   for (int y=0; y<patch_size; ++y)
   {
     for (int x=0; x<patch_size; ++x)//, ++patch_ptr)
@@ -351,13 +335,14 @@ void LidarSelector::addFromSparseMap(cv::Mat img, PointCloudXYZI::Ptr pg)
     // double ts0 = omp_get_wtime();
 
     // step1 点云降采样
+    PointCloudXYZI::Ptr pg_down(new PointCloudXYZI());
     pg_down->reserve(feat_map.size());
     downSizeFilter.setInputCloud(pg);
     downSizeFilter.filter(*pg_down);
     std::cout << " pg_down size: " << pg_down->points.size() <<std::endl;
     
+    // step2 设置格网相关参数
     reset_grid();
-    memset(map_value, 0, sizeof(float)*length);
 
     sub_sparse_map->reset();
     deque< PointPtr >().swap(sub_map_cur_frame_);
@@ -374,29 +359,25 @@ void LidarSelector::addFromSparseMap(cv::Mat img, PointCloudXYZI::Ptr pg)
     t_insert=t_depth=t_position=0;
 
     int loc_xyz[3];
-
-    // printf("A0. initial depthmap: %.6lf \n", omp_get_wtime() - ts0);
-    // double ts1 = omp_get_wtime();
-
+    std::mutex mutex_map;
     // step2 将激光点云投影到图像上，构建深度图像
-    for(int i=0; i<pg_down->size(); i++)
-    {
-        // Transform Point to world coordinate
-        V3D pt_w(pg_down->points[i].x, pg_down->points[i].y, pg_down->points[i].z);
+    for_each(pg_down->points.begin(), pg_down->points.end(), [&](PointType& pt_down){
+        V3D pt_w(pt_down.x, pt_down.y, pt_down.z);
 
-        // Determine the key of hash table      
         for(int j=0; j<3; j++)
         {
             loc_xyz[j] = floor(pt_w[j] / voxel_size);   // 记录点在哪一个voxel
         }
         VOXEL_KEY position(loc_xyz[0], loc_xyz[1], loc_xyz[2]);
 
+        std::unique_lock<std::mutex> lock(mutex_map);
         auto iter = sub_feat_map.find(position);
         if(iter == sub_feat_map.end())
         {
             sub_feat_map[position] = 1.0;
         }
-        
+        lock.unlock();
+
         // step2.2 计算视觉坐标系下坐标、像素坐标
         V3D pt_c(new_frame_->w2f(pt_w));
 
@@ -412,12 +393,9 @@ void LidarSelector::addFromSparseMap(cv::Mat img, PointCloudXYZI::Ptr pg)
                 int col = int(px[0]);
                 int row = int(px[1]);
                 it[width*row+col] = depth;
-                // cv::circle(img, cv::Point(px[0], px[1]), 6, cv::Scalar(0, 255, 0), -1, 8);
             }
         }
-    }
-    // cv::imwrite("/home/zxq/Documents/02base/std/image.png", img);
-    // printf("A. projection: %.6lf \n", omp_get_wtime() - ts0);
+    });
     std::cout << " sub_feat_map size: " << sub_feat_map.size() <<std::endl;
 
     // double t1 = omp_get_wtime();
@@ -556,7 +534,7 @@ void LidarSelector::addFromSparseMap(cv::Mat img, PointCloudXYZI::Ptr pg)
             for(int pyramid_level=0; pyramid_level<=0; pyramid_level++)
             {
                 // 仿射变换，进行视角转换
-                warpAffine(A_cur_ref_zero, ref_ftr->img, ref_ftr->px, ref_ftr->level, search_level, pyramid_level, patch_size_half, patch_wrap);
+                warpAffine(A_cur_ref_zero, imgs_[ref_ftr->id_], ref_ftr->px, ref_ftr->level, search_level, pyramid_level, patch_size_half, patch_wrap);
             }
             // 当前帧patch块
             getpatch(img, pc, patch_cache, 0);
@@ -916,6 +894,9 @@ void LidarSelector::addObservation(cv::Mat img)
     {
         PointPtr pt = sub_sparse_map->voxel_points[i];
         if(pt==nullptr) continue;
+        V3D pt_cam(new_frame_->w2f(pt->pos_));
+        if(pt_cam(2)<=0) continue;
+
         V2D pc(new_frame_->w2c(pt->pos_));  
         SE3 pose_cur = new_frame_->T_f_w_;
         bool add_flag = false;
@@ -956,10 +937,7 @@ void LidarSelector::addObservation(cv::Mat img)
                 pt->value = vk::shiTomasiScore(img, pc[0], pc[1]);
                 Vector3d f = cam->cam2world(pc);
                 FeaturePtr ftr_new(new Feature(patch_temp, pc, f, new_frame_->T_f_w_, pt->value, sub_sparse_map->search_levels[i])); 
-                ftr_new->img = new_frame_->img_pyr_[0];
                 ftr_new->id_ = new_frame_->id_;
-                // ftr_new->ImgPyr.resize(5);
-                // for(int i=0;i<5;i++) ftr_new->ImgPyr[i] = new_frame_->img_pyr_[i];
                 pt->addFrameRef(ftr_new);
             }
         }
@@ -1041,6 +1019,8 @@ void LidarSelector::detect(cv::Mat img, PointCloudXYZI::Ptr pg)
     
     // step2 构建新帧
     new_frame_.reset(new Frame(cam, img.clone()));
+    imgs_[new_frame_->id_] = img.clone();
+
     updateFrameState(*state);
 
     if(stage_ == STAGE_FIRST_FRAME && pg->size()>10)    // 首帧作为关键帧
@@ -1062,7 +1042,7 @@ void LidarSelector::detect(cv::Mat img, PointCloudXYZI::Ptr pg)
     ComputeJ(img);
 
     double t5 = omp_get_wtime();
-
+    // step6 为本帧可视地图点添加patch观测
     addObservation(img);
     
     double t2 = omp_get_wtime();
