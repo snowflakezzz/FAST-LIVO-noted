@@ -151,7 +151,6 @@ private:
     int lidar_en = 1;               // 是否使用Lidar观测
     int bgnss_en = 1;               // 是否使用GPS
     int loop_en = 1;                // 是否进行回环检测
-    bool loop_ready = false;         // 回环是否接收到新帧
     int debug = 0;
     bool fast_lio_is_ready = false;
     double delta_time = 0.0;
@@ -232,6 +231,10 @@ private:
     int keyframe_count_ = 0;
     int frame_count_ = 0;
     unordered_map<int, int> keyframe_id;         // 存储正常帧对应的关键帧id
+    unordered_map<int, double> key_time;         // 存储关键帧对应的时间戳
     bool bloop_closed = false;
+
+    std::queue<pcl::PointCloud<pcl::PointXYZI>::Ptr> key_cloud_queue;   // 存储关键帧点云队列
+
 };
 #endif

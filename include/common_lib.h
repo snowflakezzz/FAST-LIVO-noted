@@ -112,9 +112,30 @@ inline Eigen::Matrix3d skewd(const Eigen::Vector3d& x) {
 inline gtsam::Pose3 trans2gtsamPose3(Eigen::Matrix3d &R, Eigen::Vector3d &t){
     return gtsam::Pose3(gtsam::Rot3(R), gtsam::Point3(t(0), t(1), t(2)));
 }
+
+inline gtsam::Pose3 Mat2gtsamPose3(cv::Mat &R, cv::Mat &t){
+    // 检查输入矩阵的尺寸
+    if (R.rows != 3 || R.cols != 3 || t.rows != 3 || t.cols != 1) {
+        throw std::runtime_error("Invalid matrix dimensions. R must be 3x3 and t must be 3x1.");
+    }
+
+    // 将 cv::Mat 转换为 gtsam::Rot3 和 gtsam::Point3
+    gtsam::Rot3 gtsamRot(
+        R.at<double>(0, 0), R.at<double>(0, 1), R.at<double>(0, 2),
+        R.at<double>(1, 0), R.at<double>(1, 1), R.at<double>(1, 2),
+        R.at<double>(2, 0), R.at<double>(2, 1), R.at<double>(2, 2)
+    );
+
+    gtsam::Point3 gtsamTrans(
+        t.at<double>(0, 0),
+        t.at<double>(1, 0),
+        t.at<double>(2, 0)
+    );
+
+    // 构造 gtsam::Pose3
+    return gtsam::Pose3(gtsamRot, gtsamTrans);   
 }
-
-
+}
 
 namespace lidar_selection
 {

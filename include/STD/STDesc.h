@@ -22,13 +22,6 @@
 #define MAX_N 10000000000
 #define MAX_FRAME_N 20000
 
-#ifdef USE_IMG
-#include <opencv2/opencv.hpp>
-#include <boost/dynamic_bitset.hpp>
-
-typedef boost::dynamic_bitset<> bit_set;
-#endif
-
 typedef struct ConfigSetting {
   /* for point cloud pre-preocess*/
   int stop_skip_enable_ = 0;
@@ -87,12 +80,6 @@ typedef struct STDesc {
   // some other inform attached to each vertex,e.g., intensity
   Eigen::Vector3d vertex_attached_;     // 三角形三个角点在特征点提取时包含的投影点数量 todo：存brief描述子
 
-  #ifdef USE_IMG
-  bit_set des_A_;
-  bit_set des_B_;
-  bit_set des_C_;
-  // cv::Mat describer_;     // 每行为一个特征点描述子
-  #endif
 } STDesc;
 
 // plane structure for corner point extraction
@@ -240,10 +227,6 @@ void publish_std_pairs(
 
 bool attach_greater_sort(std::pair<double, int> a, std::pair<double, int> b);
 
-#ifdef USE_IMG
-inline int hamming_distance(const bit_set &a, const bit_set &b);
-#endif
-
 struct PlaneSolver {
   PlaneSolver(Eigen::Vector3d curr_point_, Eigen::Vector3d curr_normal_,
               Eigen::Vector3d target_point_, Eigen::Vector3d target_normal_)
@@ -329,10 +312,6 @@ public:
       const pcl::PointCloud<pcl::PointXYZINormal>::Ptr &target_cloud,
       std::pair<Eigen::Vector3d, Eigen::Matrix3d> &transform);
 
-  #ifdef USE_IMG
-  // compute brief for STDvec vertex
-  void GenerateBinary(const cv::Mat &img, Eigen::Vector2d &p_cam, bit_set &out);
-  #endif
 private:
   /*Following are sub-processing functions*/
 

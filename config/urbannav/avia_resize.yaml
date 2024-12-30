@@ -9,7 +9,7 @@ grid_size : 20  # 40
 patch_size : 4   # 8
 img_enable : 1 #1
 lidar_enable : 1
-loop_enable : 0
+loop_enable : 1
 outlier_threshold : 300 # 78 100 156
 ncc_en: false
 ncc_thre: 0
@@ -45,7 +45,7 @@ mapping:
                    0, 0, 1]
 
 pcd_save:
-    pcd_save_en: true
+    pcd_save_en: false
 
 camera:
     img_topic: /camera/image_color
@@ -70,7 +70,6 @@ std:
     proj_dis_max: 5
     corner_thre: 10
 
-
     # std descriptor
     descriptor_near_num: 20
     descriptor_min_len: 2
@@ -86,6 +85,4 @@ std:
     rough_dis_threshold: 0.01
     normal_threshold: 0.2
     dis_threshold: 0.5
-    icp_threshold: 0.4
-
-    pattern_file: "/home/zxq/Documents/02base/fastlivo/src/FAST-LIVO-noted/include/STD/brief_pattern.yml"
+    icp_threshold: 0.3

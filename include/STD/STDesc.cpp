@@ -92,19 +92,6 @@ void read_parameters(ros::NodeHandle &nh, ConfigSetting &config_setting) {
   nh.param<double>("std/normal_threshold", config_setting.normal_threshold_, 0.2);
   nh.param<double>("std/dis_threshold", config_setting.dis_threshold_, 0.5);
 
-  #ifdef USE_IMG
-  // brief相关参数
-  std::string pattern_file;
-  nh.param<std::string>("std/pattern_file", pattern_file, "");
-  cv::FileStorage fs(pattern_file.c_str(), cv::FileStorage::READ);
-  if(!fs.isOpened()) throw std::string("can not open pattern file") + pattern_file;
-
-  fs["x1"] >> config_setting.m_x1; config_setting.m_x1.shrink_to_fit();
-  fs["x2"] >> config_setting.m_x2; config_setting.m_x2.shrink_to_fit();
-  fs["y1"] >> config_setting.m_y1; config_setting.m_y1.shrink_to_fit();
-  fs["y2"] >> config_setting.m_y2; config_setting.m_y2.shrink_to_fit();
-  #endif
-
   std::cout << "Sucessfully load parameters:" << std::endl;
   std::cout << "----------------Main Parameters-------------------"
             << std::endl;
@@ -141,12 +128,6 @@ Eigen::Vector3d point2vec(const pcl::PointXYZI &pi) {
 bool attach_greater_sort(std::pair<double, int> a, std::pair<double, int> b) {
   return (a.first > b.first);
 }
-
-#ifdef USE_IMG
-inline int hamming_distance(const bit_set &a, const bit_set &b){
-  return (a^b).count();
-}
-#endif
 
 void publish_std_pairs(
     const std::vector<std::pair<STDesc, STDesc>> &match_std_pairs,
@@ -279,39 +260,6 @@ void publish_std_pairs(
   m_line.id = 0;
   ma_line.markers.clear();
 }
-
-#ifdef USE_IMG
-void STDescManager::GenerateBinary(const cv::Mat &img, Eigen::Vector2d &p_cam, bit_set &out){
-  const int W = img.cols;
-  const int H = img.rows;
-
-  int x1, y1, x2, y2;
-  out.resize(256);
-  out.reset();
-
-  // cv::Mat img_line;
-  // img_line = img.clone();
-
-  for(unsigned int i = 0; i < config_setting_.m_x1.size(); ++i)
-  {
-    x1 = (int)(p_cam(0) + config_setting_.m_x1[i]);
-    y1 = (int)(p_cam(1) + config_setting_.m_y1[i]);
-    x2 = (int)(p_cam(0) + config_setting_.m_x2[i]);
-    y2 = (int)(p_cam(1) + config_setting_.m_y2[i]);
-
-    if(x1 >= 0 && x1 < W && y1 >= 0 && y1 < H
-      && x2 >= 0 && x2 < W && y2 >= 0 && y2 < H)
-    {
-      if( img.ptr<unsigned char>(y1)[x1] < img.ptr<unsigned char>(y2)[x2] )
-      {
-        out.set(i);
-      }
-      // cv::line(img_line, cv::Point(x1, y1), cv::Point(x2, y2), cv::Scalar(0, 255, 0), 1);
-    }
-  }
-  // cv::imwrite("/home/zxq/Documents/02base/fastlivo/src/FAST-LIVO-noted/Log/brief.png", img_line);
-}
-#endif
 
 void STDescManager::GenerateSTDescs(
     pcl::PointCloud<pcl::PointXYZI>::Ptr &input_cloud,
@@ -1064,19 +1012,6 @@ void STDescManager::candidate_selector(const std::vector<STDesc> &stds_vec, std:
               // rough filter with side lengths
               if (dis < dis_threshold) {
                 dis_match_cnt++;
-                #ifdef USE_IMG
-                double vertex_attach_diff = hamming_distance(src_std.des_A_, data_base_[position][j].des_A_)
-                                            + hamming_distance(src_std.des_B_, data_base_[position][j].des_B_)
-                                            + hamming_distance(src_std.des_C_, data_base_[position][j].des_C_);
-                vertex_attach_diff /= 3;
-
-                if (vertex_attach_diff < 80) {    // vins-mono中用的80
-                  final_match_cnt++;
-                  useful_match[i] = true;
-                  useful_match_position[i].push_back(position);
-                  useful_match_index[i].push_back(j);
-                }
-                #else
                 // rough filter with vertex attached info
                 // step2.4 通过三角描述子顶点在投影过程中使用到的点数，进一步筛选
                 double vertex_attach_diff =
@@ -1096,7 +1031,6 @@ void STDescManager::candidate_selector(const std::vector<STDesc> &stds_vec, std:
                   useful_match_position[i].push_back(position);
                   useful_match_index[i].push_back(j);
                 }
-                #endif
               }
             }
           }
