@@ -1,6 +1,6 @@
 #include "laser_mapping.h"
 #include <vikit/camera_loader.h>
-#define SAVE_PLY
+// #define SAVE_PLY
 LaserMapping::LaserMapping()
 {
     pcl_wait_pub = boost::make_shared<PointCloudXYZI>();
@@ -994,6 +994,18 @@ void LaserMapping::readParameters(ros::NodeHandle &nh)
     if(loop_en){
         ConfigSetting config_setting;
         read_parameters(nh, config_setting);
+
+        // superpoint+lightglue组合参数
+        Lightglue::Configuation cfg;
+        nh.param<string>("lightglue/lightglue_path", cfg.lightglue_path, "");
+        nh.param<string>("lightglue/extractor_path", cfg.extractor_path, "");
+        nh.param<string>("lightglue/extractor_type", cfg.extractor_type, "superpoint");
+        std::transform(cfg.extractor_type.begin(), cfg.extractor_type.end(), cfg.extractor_type.begin(),
+                   [](unsigned char c) { return std::tolower(c); });        // 转小写
+        nh.param<float>("lightglue/threshold", cfg.threshold, 0.5);
+        nh.param<int>("lightglue/image_size", cfg.image_size, 512);
+        p_lightglue = std::make_shared<Lightglue::LightGlueDecoupleOnnxRunner>(cfg);
+
         p_stdloop = std::make_shared<STDescManager>(config_setting);
         thread_loop_ = std::thread(&LaserMapping::loop_detect, this);
     }
@@ -1194,23 +1206,11 @@ void LaserMapping::loop_detect(){
                 // todo: 使用DBOW/视觉帧间配准？查看两帧之间匹配是否准确及帧间变化量
                 cv::Mat img_cur = lidar_selector->imgs_[src_id];
                 cv::Mat img_match = lidar_selector->imgs_[match_id];
-                
-                std::vector<cv::KeyPoint> keypoints_cur, keypoints_match;
-                cv::Mat descriptors_cur, descriptors_match;
-                orb->detectAndCompute(img_cur, cv::noArray(), keypoints_cur, descriptors_cur);
-                orb->detectAndCompute(img_match, cv::noArray(), keypoints_match, descriptors_match);
-                cv::BFMatcher matcher(cv::NORM_HAMMING, true);
-                std::vector<cv::DMatch> matches;
-                std::vector<cv::DMatch> good_matches;
-                matcher.match(descriptors_cur, descriptors_match, matches);
 
                 std::vector<cv::Point2f> points1, points2;
-                for (const auto& match : matches) {
-                    if(match.distance > 128) continue;
-                    good_matches.push_back(match);
-                    points1.push_back(keypoints_cur[match.queryIdx].pt);
-                    points2.push_back(keypoints_match[match.trainIdx].pt);
-                }
+                auto match_points = p_lightglue->InferenceImage(img_cur, img_match);
+                points1 = match_points.first;
+                points2 = match_points.second;
 
                 #ifdef SAVE_PLY
                 cv::Mat img_matches;
@@ -1220,14 +1220,20 @@ void LaserMapping::loop_detect(){
                 std::stringstream filename;
                 filename << "/media/zxq/T5/01graduate/03result/matches/01orb/" << keyCloudInd << "_" << match_frame << ".jpg";
                 cv::imwrite(filename.str(), img_matches);
+                filename.str(""); filename.clear();
+                filename << "/media/zxq/T5/01graduate/03result/matches/01orb/" << keyCloudInd << ".jpg";
+                cv::imwrite(filename.str(), img_cur);
+                filename.str(""); filename.clear();
+                filename << "/media/zxq/T5/01graduate/03result/matches/01orb/" << match_frame << ".jpg";
+                cv::imwrite(filename.str(), img_match);
                 #endif
 
-                fout << "[Loop Image] : match size: " << good_matches.size() << " vs " << matches.size() << std::endl;
+                fout << "[Loop Image] : match size: " << points1.size() << " vs " << points2.size() << std::endl;
                 fout.close();
-                
+
                 if(keyframe_id.count(src_id) || keyframe_id.count(match_id)) continue;
 
-                if(good_matches.size() < 4){
+                if(points2.size() < 4){     // 按照匹配点及提取点的比例来判断是否为关键帧
                     continue;
                 }
 
@@ -1339,7 +1345,7 @@ void LaserMapping::publish_frame_world_rgb()
                 #ifdef SAVE_PLY
                 std::stringstream filename;
                 filename << "/media/zxq/T5/01graduate/03result/ply_file/" << std::fixed << std::setprecision(0) << LidarMeasures.last_update_time * 1e6 << ".ply";
-                pcl::io::savePLYFileASCII(filename.str(), *laserCloudWorldRGB);
+                pcl::io::savePLYFileBinary(filename.str(), *laserCloudWorldRGB);
                 #endif
 
                 std::unique_lock<std::mutex> lock(m_loop_rady);

@@ -53,6 +53,7 @@
 #include <gtsam/slam/PriorFactor.h>
 #include <gtsam/slam/BetweenFactor.h>
 #include <gtsam/inference/Factor.h>
+#include "LightGlue/LightGlueDecoupleOnnxRunner.h"
 
 #define INIT_TIME           (0.5)
 #define MAXN                (360000)
@@ -115,6 +116,7 @@ private:
     GNSSProcessing::Ptr p_gnss;
     STDescManager::Ptr p_stdloop;
     lidar_selection::LidarSelectorPtr lidar_selector;              // visual part
+    Lightglue::LightGlueDecoupleOnnxRunner::Ptr p_lightglue;       // 视觉特征提取及匹配
 
     std::thread         thread_loop_;
 

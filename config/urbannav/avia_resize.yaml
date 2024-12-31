@@ -85,4 +85,8 @@ std:
     rough_dis_threshold: 0.01
     normal_threshold: 0.2
     dis_threshold: 0.5
-    icp_threshold: 0.3
+    icp_threshold: 0.5
+
+lightglue:
+    lightglue_path: /home/zxq/Documents/02base/fastlivo/src/FAST-LIVO-noted/config/weight/superpoint_lightglue.onnx
+    extractor_path: /home/zxq/Documents/02base/fastlivo/src/FAST-LIVO-noted/config/weight/superpoint.onnx

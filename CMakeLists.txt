@@ -108,7 +108,12 @@ catkin_package(
   INCLUDE_DIRS include
 )
 
+set(ONNXRUNTIME_ROOTDIR "/home/zxq/Documents/01ThirdParty/onnxruntime-linux-x64-gpu-1.15.0")
+include_directories("${ONNXRUNTIME_ROOTDIR}/include")
+link_directories("${ONNXRUNTIME_ROOTDIR}/lib")
+
 add_library(std include/STD/STDesc.cpp
+                include/LightGlue/LightGlueDecoupleOnnxRunner.cpp
                     )
 
 add_library(vio src/lidar_selection.cpp
@@ -122,7 +127,7 @@ add_executable(fastlivo_mapping src/laserMapping.cpp
                                 src/GNSS_Processing.cpp
                                 src/laser_mapping.cpp
                                 )
-target_link_libraries(fastlivo_mapping ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${PYTHON_LIBRARIES} ${CERES_LIBRARIES} gtsam vio std)
+target_link_libraries(fastlivo_mapping ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${PYTHON_LIBRARIES} ${CERES_LIBRARIES} gtsam onnxruntime vio std)
 target_include_directories(fastlivo_mapping PRIVATE ${PYTHON_INCLUDE_DIRS})
 
 
