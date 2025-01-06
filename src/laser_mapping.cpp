@@ -1,6 +1,6 @@
 #include "laser_mapping.h"
 #include <vikit/camera_loader.h>
-// #define SAVE_PLY
+
 LaserMapping::LaserMapping()
 {
     pcl_wait_pub = boost::make_shared<PointCloudXYZI>();
@@ -1004,6 +1004,13 @@ void LaserMapping::readParameters(ros::NodeHandle &nh)
                    [](unsigned char c) { return std::tolower(c); });        // 转小写
         nh.param<float>("lightglue/threshold", cfg.threshold, 0.5);
         nh.param<int>("lightglue/image_size", cfg.image_size, 512);
+        nh.param<string>("lightglue/device", cfg.device, "gpu");
+        string mask_path;
+        nh.param<string>("lightglue/mask_path", mask_path, "");
+        cfg.mask = cv::imread(mask_path, cv::IMREAD_GRAYSCALE);
+        cv::threshold(cfg.mask, cfg.mask, 127, 1, cv::THRESH_BINARY);       // 二值化
+        // cv::imshow("mask", cfg.mask);
+        // cv::waitKey(0);
         p_lightglue = std::make_shared<Lightglue::LightGlueDecoupleOnnxRunner>(cfg);
 
         p_stdloop = std::make_shared<STDescManager>(config_setting);
@@ -1208,32 +1215,28 @@ void LaserMapping::loop_detect(){
                 cv::Mat img_match = lidar_selector->imgs_[match_id];
 
                 std::vector<cv::Point2f> points1, points2;
-                auto match_points = p_lightglue->InferenceImage(img_cur, img_match);
+                int points_num = 0;
+                auto match_points = p_lightglue->InferenceImage(img_cur, img_match, points_num);
                 points1 = match_points.first;
                 points2 = match_points.second;
 
                 #ifdef SAVE_PLY
                 cv::Mat img_matches;
-                cv::drawMatches(img_cur, keypoints_cur, img_match, keypoints_match, good_matches, img_matches,
-                    cv::Scalar::all(-1), cv::Scalar::all(-1),
-                    std::vector<char>(), cv::DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS);
+                std::vector<cv::Mat> imagesPair = {img_cur, img_match};
+                std::vector<std::string> titlePair = {"srcImage", "destImage"};
+                img_matches = common::plotImages(imagesPair, match_points, titlePair);
                 std::stringstream filename;
-                filename << "/media/zxq/T5/01graduate/03result/matches/01orb/" << keyCloudInd << "_" << match_frame << ".jpg";
+                filename << "/media/zxq/T5/01graduate/03result/matches/02lightglue/" << keyCloudInd << "_" << match_frame << ".jpg";
                 cv::imwrite(filename.str(), img_matches);
-                filename.str(""); filename.clear();
-                filename << "/media/zxq/T5/01graduate/03result/matches/01orb/" << keyCloudInd << ".jpg";
-                cv::imwrite(filename.str(), img_cur);
-                filename.str(""); filename.clear();
-                filename << "/media/zxq/T5/01graduate/03result/matches/01orb/" << match_frame << ".jpg";
-                cv::imwrite(filename.str(), img_match);
                 #endif
 
-                fout << "[Loop Image] : match size: " << points1.size() << " vs " << points2.size() << std::endl;
+                double key_rate = (double)points1.size() / (double)points_num;
+                fout << "[Loop Image] : match size: " << points1.size() << " vs " << points_num << ": " << key_rate << std::endl;
                 fout.close();
 
                 if(keyframe_id.count(src_id) || keyframe_id.count(match_id)) continue;
 
-                if(points2.size() < 4){     // 按照匹配点及提取点的比例来判断是否为关键帧
+                if(key_rate < 0.2){     // 按照匹配点及提取点的比例来判断是否为关键帧
                     continue;
                 }
 

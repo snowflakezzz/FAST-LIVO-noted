@@ -14,7 +14,7 @@ add_definitions(-w)
 # add_definitions(-DUSE_VGICP)
 # add_definitions(-DMINI)
 # add_definitions(-DUSE_ikdtree)
-# add_definitions(-DDEBUG_PRINT)
+# add_definitions(-DSAVE_PLY)
 # add_definitions(-DUSE_FOV_Checker)
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fexceptions" )

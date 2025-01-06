@@ -2,7 +2,6 @@
 
 namespace Lightglue{
 LightGlueDecoupleOnnxRunner::LightGlueDecoupleOnnxRunner(Configuation &config){
-    scale[0] = 0.0; scale[1] = 0.0;
     cfg = config;
     if(cfg.lightglue_path.empty() || cfg.extractor_path.empty()){
         std::cout << "[ERROR] need lightglue and extractor weight path" << std::endl;
@@ -91,7 +90,7 @@ int LightGlueDecoupleOnnxRunner::init_ortenv(){
 }
 
 std::pair<std::vector<cv::Point2f>, std::vector<cv::Point2f>> 
-        LightGlueDecoupleOnnxRunner::InferenceImage(const cv::Mat &srcImage, const cv::Mat &destImage){
+        LightGlueDecoupleOnnxRunner::InferenceImage(const cv::Mat &srcImage, const cv::Mat &destImage, int &pointNum){
     if (srcImage.empty() || destImage.empty())
     {
         throw "[ERROR] ImageEmptyError ";
@@ -100,27 +99,51 @@ std::pair<std::vector<cv::Point2f>, std::vector<cv::Point2f>>
     cv::Mat destImage_copy(destImage);
 
     // step1 图像预处理
-    cv::Mat src = PreProcess(srcImage_copy, scale[0]);
-    cv::Mat dest = PreProcess(destImage_copy, scale[1]);
+    std::vector<float> scales(2, 0.0);
+    cv::Mat src = PreProcess(srcImage_copy, scales[0]);
+    cv::Mat dest = PreProcess(destImage_copy, scales[1]);
 
     // step2 特征提取
     extractor_outputtensors0 = extractor_inference(src);
     extractor_outputtensors1 = extractor_inference(dest);
 
-    // step3 将tensor结果转为cv::Point2f并进行坐标归一化
-    auto src_extract = postprocess(extractor_outputtensors0, src.cols, src.rows);
-    auto dest_extract = postprocess(extractor_outputtensors1, dest.cols, dest.rows);
+    // step3 将tensor结果转为cv::Point2f
+    auto src_extract = postprocess(extractor_outputtensors0);
+    auto dest_extract = postprocess(extractor_outputtensors1);
+
+    // step4 特征点坐标归一化，用于特征匹配输入
+    auto src_normal = keypoint_normal(src_extract.first, src.cols, src.rows);
+    auto dest_normal = keypoint_normal(dest_extract.first, dest.cols, dest.rows);
+    
+    int src_num = src_extract.first.size();
+    int dest_num = dest_extract.first.size();
+    pointNum = std::min(src_num, dest_num);
 
     // step4 特征匹配
-    match_inference(src_extract.first, dest_extract.first, src_extract.second, dest_extract.second);
+    match_inference(src_normal, dest_normal, src_extract.second, dest_extract.second);
 
-    // step5 将匹配的tensor结果转为cv::Point2f
-    match_postprocess(src_extract.first, dest_extract.first);
+    // step5 将匹配的tensor结果转为cv::Point2f 输出的坐标值不对
+    match_postprocess(src_extract.first, dest_extract.first, scales);
 
-    return keypoints_result;
+    return this->keypoints_result;
 }
 
-void LightGlueDecoupleOnnxRunner::match_postprocess(std::vector<cv::Point2f> kpts0, std::vector<cv::Point2f> kpts1){
+std::vector<cv::Point2f> LightGlueDecoupleOnnxRunner::keypoint_normal(std::vector<cv::Point2f>& input, int w, int h){
+    cv::Size size(w, h);
+    cv::Point2f shift(static_cast<float>(w) / 2, static_cast<float>(h) / 2);
+    float scale = static_cast<float>((std::max)(w, h)) / 2;
+
+    std::vector<cv::Point2f> normalizedKpts;
+    for (const cv::Point2f &kpt : input)
+    {
+        cv::Point2f normalizedKpt = (kpt - shift) / scale;
+        normalizedKpts.emplace_back(normalizedKpt);
+    }
+
+    return normalizedKpts;
+}
+
+void LightGlueDecoupleOnnxRunner::match_postprocess(std::vector<cv::Point2f> kpts0, std::vector<cv::Point2f> kpts1, std::vector<float> &scales){
     // 匹配情况
     std::vector<int64_t> matches_Shape = matcher_outputtensors[0].GetTensorTypeAndShapeInfo().GetShape();
     int64_t *matches = (int64_t *)matcher_outputtensors[0].GetTensorMutableData<void>();
@@ -135,16 +158,22 @@ void LightGlueDecoupleOnnxRunner::match_postprocess(std::vector<cv::Point2f> kpt
     for (int i = 0; i < matches_Shape[0]; i++){
         if (mscores[i] > cfg.threshold){
             auto kpt0 = kpts0[matches[i * 2]];
-            kpt0.x = (kpt0.x + 0.5) / scale[0] - 0.5;
-            kpt0.y = (kpt0.y + 0.5) / scale[1] - 0.5;
+            kpt0.x = (kpt0.x + 0.5) / scales[0] - 0.5;
+            kpt0.y = (kpt0.y + 0.5) / scales[0] - 0.5;
+            // 如果有mask，则进行mask判断，黑色部分的特征点不参与匹配
+            if(!cfg.mask.empty() && cfg.mask.at<uchar>(cvRound(kpt0.y), cvRound(kpt0.x))==0)
+                continue;
+
             auto kpt1 = kpts1[matches[i * 2 + 1]];
-            kpt1.x = (kpt1.x + 0.5) / scale[1] - 0.5;
-            kpt1.y = (kpt1.y + 0.5) / scale[1] - 0.5;
+            kpt1.x = (kpt1.x + 0.5) / scales[1] - 0.5;
+            kpt1.y = (kpt1.y + 0.5) / scales[1] - 0.5;
+            if(!cfg.mask.empty() && cfg.mask.at<uchar>(cvRound(kpt1.y), cvRound(kpt1.x))==0)
+                continue;
+            
             m_kpts0.emplace_back(kpt0);
             m_kpts1.emplace_back(kpt1);
         }
     }
-
     keypoints_result.first = m_kpts0;
     keypoints_result.second = m_kpts1;
 }
@@ -205,7 +234,7 @@ void LightGlueDecoupleOnnxRunner::match_inference(std::vector<cv::Point2f> kpts0
     matcher_outputtensors = std::move(output_tensor);
 }
 
-std::pair<std::vector<cv::Point2f>, float*> LightGlueDecoupleOnnxRunner::postprocess(std::vector<Ort::Value> &tensor, int w, int h){
+std::pair<std::vector<cv::Point2f>, float*> LightGlueDecoupleOnnxRunner::postprocess(std::vector<Ort::Value> &tensor){
     std::pair<std::vector<cv::Point2f>, float *> extractor_result;
 
     std::vector<int64_t> kpts_Shape = tensor[0].GetTensorTypeAndShapeInfo().GetShape();
@@ -218,16 +247,12 @@ std::pair<std::vector<cv::Point2f>, float*> LightGlueDecoupleOnnxRunner::postpro
     std::vector<int64_t> descriptors_Shape = tensor[2].GetTensorTypeAndShapeInfo().GetShape();
     float *desc = (float *)tensor[2].GetTensorMutableData<void>();
 
-    // step2 特征点坐标归一化
-    cv::Point2f shift(static_cast<float>(w)/2, static_cast<float>(h)/2);
-    float scale = static_cast<float>(std::max(w, h))/2;
-
+    // step2 特征点坐标转为cv::Point2f
     std::vector<cv::Point2f> kpts_f;
     for (int i = 0; i < kpts_Shape[1] * 2; i += 2)
     {
         cv::Point2f kpt(kpts[i], kpts[i + 1]);
-        cv::Point2f normalizedKpt = (kpt - shift) / scale;
-        kpts_f.emplace_back(normalizedKpt);
+        kpts_f.emplace_back(kpt);
     }
 
     extractor_result.first = kpts_f;
@@ -287,16 +312,16 @@ std::vector<Ort::Value> LightGlueDecoupleOnnxRunner::extractor_inference(cv::Mat
     return output_tensor;
 }
 
-cv::Mat LightGlueDecoupleOnnxRunner::PreProcess(cv::Mat &img, float &scale){
+cv::Mat LightGlueDecoupleOnnxRunner::PreProcess(cv::Mat &img, float &scales){
     int heigh = img.rows; int width = img.cols;
 
     // step1 图像缩放
     int h_new, w_new, size;
     size = cfg.image_size;
     if(size == 512 || size == 1024 || size == 2048){
-        scale = static_cast<float>(size) / static_cast<float>(std::max(heigh, width));
-        h_new = static_cast<int>(round(heigh * scale));
-        w_new = static_cast<int>(round(width * scale));
+        scales = static_cast<float>(size) / static_cast<float>(std::max(heigh, width));
+        h_new = static_cast<int>(round(heigh * scales));
+        w_new = static_cast<int>(round(width * scales));
     }
     else 
         throw std::invalid_argument("Incorrect new size: " + std::to_string(size));

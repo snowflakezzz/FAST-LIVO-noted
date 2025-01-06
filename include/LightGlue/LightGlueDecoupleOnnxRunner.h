@@ -20,7 +20,8 @@ struct Configuation
 
     int image_size;
     float threshold;            // 匹配阈值0 0.5
-    std::string device;
+    std::string device;         // cuda or gpu
+    cv::Mat mask;
 };
 
 class LightGlueDecoupleOnnxRunner{
@@ -34,23 +35,24 @@ public:
     
     // 特征提取及匹配入口
     std::pair<std::vector<cv::Point2f>, std::vector<cv::Point2f>> 
-        InferenceImage(const cv::Mat &srcImage, const cv::Mat &destImage);
+        InferenceImage(const cv::Mat &srcImage, const cv::Mat &destImage, int &pointNum);
 
 private:
-    cv::Mat PreProcess(cv::Mat &img, float &scale);    
+    cv::Mat PreProcess(cv::Mat &img, float &scales);    
 
     std::vector<Ort::Value> extractor_inference(cv::Mat &img);
     
     // 返回 特征点集合，描述子集合
-    std::pair<std::vector<cv::Point2f>, float*> postprocess(std::vector<Ort::Value> &tensor, int w, int h);
+    std::pair<std::vector<cv::Point2f>, float*> postprocess(std::vector<Ort::Value> &tensor);
 
     void match_inference(std::vector<cv::Point2f> kpts0, std::vector<cv::Point2f> kpts1, float *desc0, float *desc1);
 
-    void match_postprocess(std::vector<cv::Point2f> kpts0, std::vector<cv::Point2f> kpts1);
+    void match_postprocess(std::vector<cv::Point2f> kpts0, std::vector<cv::Point2f> kpts1, std::vector<float> &scales);
+
+    std::vector<cv::Point2f> keypoint_normal(std::vector<cv::Point2f>& input, int w, int h);
 
 private:
     Configuation cfg;
-    float scale[2];
 
     Ort::Env env0, env1;
     Ort::SessionOptions session_options0, session_options1;
