@@ -109,6 +109,8 @@ void LaserMapping::Run(){
             out_msg.image = img_rgb;
             img_pub.publish(out_msg.toImageMsg());
 
+            if(loop_en) this->save_keyframe_factor();
+
             if(img_en) publish_frame_world_rgb();
             publish_visual_world_sub_map();
             
@@ -117,7 +119,6 @@ void LaserMapping::Run(){
             euler_cur = RotMtoEuler(state.rot_end);
 
             if(bgnss_en) p_gnss->input_path(LidarMeasures.last_update_time, state.pos_end);
-            if(loop_en) this->save_keyframe_factor();
         }
         return;
     }
@@ -1039,7 +1040,6 @@ void LaserMapping::readParameters(ros::NodeHandle &nh)
 }
 
 bool LaserMapping::save_keyframe(){
-    frame_count_++;
     if (keyframe_count_ == 0){
         return true;
     }
@@ -1110,6 +1110,8 @@ void LaserMapping::save_keyframe_factor(){
             isam->update();
             isam->update();
             
+            bloop_closed = false;
+
             // save gtsam result
             gtsam::Values optimizedValues = isam->calculateEstimate();
             std::fstream fout(DEBUG_FILE_DIR("loop_tum.txt"), std::ios::out);
@@ -1135,17 +1137,16 @@ void LaserMapping::save_keyframe_factor(){
     }
 
     last_state = state;
-    keyframe_id[frame_count_-1] = keyframe_count_;
+    int frame_id = lidar_selector->new_frame_->id_;
+    keyframe_id[frame_id] = keyframe_count_;
     keyframe_count_++;
 }
 
 void LaserMapping::loop_detect(){
-    size_t cloudInd = 0;
+    size_t cloudInd = 0;        // 彩色点云帧数目，与frame id一致
     size_t keyCloudInd = 0;
     pcl::PointCloud<pcl::PointXYZI>::Ptr key_cloud(new pcl::PointCloud<pcl::PointXYZI>);
 
-    // for orb match
-    cv::Ptr<cv::ORB> orb = cv::ORB::create();
     cv::Mat K = (cv::Mat_<float>(3, 3) << lidar_selector->fx, 0, lidar_selector->cx, 0, lidar_selector->fy, lidar_selector->cy, 0, 0, 1);
 
     while(1){
@@ -1190,9 +1191,9 @@ void LaserMapping::loop_detect(){
                 int match_frame = search_result.first;
 
                 std::fstream fout(DEBUG_FILE_DIR("loop_result.txt"), std::ios::app);
-                fout << "[Loop Detection] triggle loop: " << keyCloudInd << "--"
-                    << match_frame << ", score:" << search_result.second
-                    << std::endl;
+                // fout << "[Loop Detection] triggle loop: " << keyCloudInd << "--"
+                //     << match_frame << ", score:" << search_result.second
+                //     << std::endl;
                 // fout.close();
                 
                 // step4.1 通过关键帧计算匹配帧
@@ -1202,13 +1203,12 @@ void LaserMapping::loop_detect(){
                     src_id = cloudInd + j - sub_frame_num;
                     if(keyframe_id.count(src_id)) break;
                 }
-                src_id = keyframe_id[src_id];
 
                 for(size_t j = 1; j <= sub_frame_num; ++j){
                     match_id = match_frame * sub_frame_num + j;
                     if(keyframe_id.count(match_id)) break;
                 }
-                match_id = keyframe_id[match_id];
+                if(!keyframe_id.count(src_id) || !keyframe_id.count(match_id)) continue;
 
                 // todo: 使用DBOW/视觉帧间配准？查看两帧之间匹配是否准确及帧间变化量
                 cv::Mat img_cur = lidar_selector->imgs_[src_id];
@@ -1222,7 +1222,10 @@ void LaserMapping::loop_detect(){
 
                 #ifdef SAVE_PLY
                 cv::Mat img_matches;
-                std::vector<cv::Mat> imagesPair = {img_cur, img_match};
+                cv::Mat color_cur, color_match;
+                cv::cvtColor(img_cur, color_cur, cv::COLOR_GRAY2BGR);
+                cv::cvtColor(img_match, color_match, cv::COLOR_GRAY2BGR);
+                std::vector<cv::Mat> imagesPair = {color_cur, color_match};
                 std::vector<std::string> titlePair = {"srcImage", "destImage"};
                 img_matches = common::plotImages(imagesPair, match_points, titlePair);
                 std::stringstream filename;
@@ -1231,25 +1234,31 @@ void LaserMapping::loop_detect(){
                 #endif
 
                 double key_rate = (double)points1.size() / (double)points_num;
-                fout << "[Loop Image] : match size: " << points1.size() << " vs " << points_num << ": " << key_rate << std::endl;
-                fout.close();
-
-                if(keyframe_id.count(src_id) || keyframe_id.count(match_id)) continue;
+                // fout << "[Loop Image] : match size: " << points1.size() << " vs " << points_num << ": " << key_rate << " " << search_result.second << std::endl;
+                // fout.close();
 
                 if(key_rate < 0.2){     // 按照匹配点及提取点的比例来判断是否为关键帧
+                    fout << std::fixed << std::setprecision(6) << key_time[keyframe_id[src_id]] << " " << key_time[keyframe_id[match_id]] << " 0" << std::endl;
+                    fout.close();
                     continue;
                 }
+                fout << std::fixed << std::setprecision(6) << key_time[keyframe_id[src_id]] << " " << key_time[keyframe_id[match_id]] << " 1" << std::endl;
+                fout.close();
 
                 cv::Mat E = cv::findEssentialMat(points1, points2, K, cv::RANSAC);
                 cv::Mat R, t;
                 cv::recoverPose(E, points1, points2, K, R, t);
 
                 gtsam::Vector Vector6(6);
-                Vector6 << search_result.second, search_result.second, search_result.second,
-                        search_result.second, search_result.second, search_result.second;
+                Vector6 << 0.1, 0.1, 0.1,
+                        0.1, 0.1, 0.1;
+                // Vector6 << search_result.second, search_result.second, search_result.second,
+                //         search_result.second, search_result.second, search_result.second;
                 gtsam::noiseModel::Diagonal::shared_ptr constraint_noise = gtsam::noiseModel::Diagonal::Variances(Vector6);
                 
                 // todo: 计算回环约束后，计算相对位姿
+                src_id = keyframe_id[src_id];
+                match_id = keyframe_id[match_id];
                 loopindex_buffer.push_back(std::make_pair(src_id, match_id));
                 loop_pose.push_back(common::Mat2gtsamPose3(R, t));
                 loop_noise.push_back(constraint_noise);
@@ -1347,7 +1356,7 @@ void LaserMapping::publish_frame_world_rgb()
                 
                 #ifdef SAVE_PLY
                 std::stringstream filename;
-                filename << "/media/zxq/T5/01graduate/03result/ply_file/" << std::fixed << std::setprecision(0) << LidarMeasures.last_update_time * 1e6 << ".ply";
+                filename << "/home/zxq/Documents/03data/plyfile/" << std::fixed << std::setprecision(0) << LidarMeasures.last_update_time * 1e6 << ".ply";
                 pcl::io::savePLYFileBinary(filename.str(), *laserCloudWorldRGB);
                 #endif
 

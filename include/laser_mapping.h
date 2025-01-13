@@ -231,7 +231,6 @@ private:
     gtsam::ISAM2 *isam;
     gtsam::Values initialEstimate;
     int keyframe_count_ = 0;
-    int frame_count_ = 0;
     unordered_map<int, int> keyframe_id;         // 存储正常帧对应的关键帧id
     unordered_map<int, double> key_time;         // 存储关键帧对应的时间戳
     bool bloop_closed = false;

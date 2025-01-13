@@ -9,26 +9,26 @@ grid_size : 20  # 40
 patch_size : 4   # 8
 img_enable : 1 #1
 lidar_enable : 1
-loop_enable : 0
+loop_enable : 1
 outlier_threshold : 300 # 78 100 156
 ncc_en: false
 ncc_thre: 0
 img_point_cov : 100 # 1000
 laser_point_cov : 0.001 # 0.001
-delta_time: 0.0         # camera与lidar时偏 =lidar时间 - camera时间
+delta_time: 0.032         # camera与lidar时偏 =lidar时间 - camera时间
 
 gnss:
-    gnss_en: 1           # 是否使用gnss观测
+    gnss_en: 0           # 是否使用gnss观测
     extrinsic: [0,0,0]
 
 common:
-    lid_topic:  "/velodyne_points"
-    imu_topic:  "/imu/data"
+    lid_topic:  "/livox/lidar"
+    imu_topic:  "/livox/imu"
     gnss_topic: "/navsat/fix"
 
 preprocess:
-    lidar_type: 2 # 1:Livox Avia LiDAR  2:VELO16  3:OUST64  4:XT32 
-    scan_line: 32 # 16  64  32
+    lidar_type: 1 # 1:Livox Avia LiDAR  2:VELO16  3:OUST64  4:XT32 
+    scan_line: 16 # 16  64  32
     blind: 4 # blind x m disable
     fov: 360  # 视场角
     scan_rang: 3600 # 水平点数
@@ -48,11 +48,11 @@ pcd_save:
     pcd_save_en: false
 
 camera:
-    img_topic: /camera/image_color
-    Rcl: [0.999346,  0.032359, -0.0161335,
-         -0.0157155, -0.0131319,   -0.99979,
-          -0.0325641,    0.99939, -0.0126148]
-    Pcl: [-0.0111367, 0.0432606, 0.172745]
+    img_topic: /camera/image_color/compressed
+    Rcl:  [-1.13207470e-03,-9.99998564e-01,5.04621550e-04,
+          -1.58687695e-02,-4.86593873e-04,-9.99873929e-01,
+          9.99873884e-01,-1.13993481e-03,-1.58682434e-02]
+    Pcl: [0,0,0]
 
 std:
     # pre process
@@ -85,7 +85,7 @@ std:
     rough_dis_threshold: 0.01
     normal_threshold: 0.2
     dis_threshold: 0.5
-    icp_threshold: 0.3
+    icp_threshold: 0.5
 
 lightglue:
     lightglue_path: /home/zxq/Documents/02base/fastlivo/src/FAST-LIVO-noted/config/weight/superpoint_lightglue.onnx

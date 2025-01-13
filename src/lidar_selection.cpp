@@ -509,7 +509,7 @@ void LidarSelector::addFromSparseMap(cv::Mat img, PointCloudXYZI::Ptr pg)
            
             int search_level;
             Matrix2d A_cur_ref_zero;
-
+            // step4.3 构建patch残差
             auto iter_warp = Warp_map.find(ref_ftr->id_);
             if(iter_warp != Warp_map.end())
             {
@@ -807,8 +807,6 @@ float LidarSelector::UpdateState(cv::Mat img, float total_residual, int level)
                 uint8_t* img_ptr = (uint8_t*) img.data + (v_ref_i+x*scale-patch_size_half*scale)*width + u_ref_i-patch_size_half*scale;
                 for (int y=0; y<patch_size; ++y, img_ptr+=scale) 
                 {
-                    // if((level==2 && iteration==0) || (level==1 && iteration==0) || level==0)
-                    //{
                     float du = 0.5f * ((w_ref_tl*img_ptr[scale] + w_ref_tr*img_ptr[scale*2] + w_ref_bl*img_ptr[scale*width+scale] + w_ref_br*img_ptr[scale*width+scale*2])
                                 -(w_ref_tl*img_ptr[-scale] + w_ref_tr*img_ptr[0] + w_ref_bl*img_ptr[scale*width-scale] + w_ref_br*img_ptr[scale*width]));
                     float dv = 0.5f * ((w_ref_tl*img_ptr[scale*width] + w_ref_tr*img_ptr[scale+scale*width] + w_ref_bl*img_ptr[width*scale*2] + w_ref_br*img_ptr[width*scale*2+scale])
@@ -826,7 +824,7 @@ float LidarSelector::UpdateState(cv::Mat img, float total_residual, int level)
                     n_meas_++;
                     H_sub.block<1,6>(i*patch_size_total+x*patch_size+y,0) << JdR, Jdt;
                 }
-            }  
+            }
 
             sub_sparse_map->errors[i] = patch_error;
             error += patch_error;
@@ -1010,8 +1008,7 @@ void LidarSelector::detect(cv::Mat img, PointCloudXYZI::Ptr pg)
     if(width!=img.cols || height!=img.rows)
     {
         std::cout<<"Resize the img scale !!!"<<std::endl;
-        double scale = 0.5;
-        cv::resize(img,img,cv::Size(img.cols*scale,img.rows*scale),0,0,CV_INTER_LINEAR);
+        cv::resize(img,img,cv::Size(width, height),0,0,CV_INTER_LINEAR);
     }
     img_rgb = img.clone();
     img_cp = img.clone();

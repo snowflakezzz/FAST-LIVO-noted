@@ -217,7 +217,7 @@ void GNSSProcessing::Initialization()
     Vector3d dir = gnss_vel.cross(odo_vel);
     double cos_yaw = gnss_vel.dot(odo_vel) / (gnss_vel.norm() * odo_vel.norm());
     yaw_ = acos(cos_yaw);
-    yaw_ *= dir.y()>0? 1.0 :-1.0;
+    yaw_ *= dir.y()>0? -1.0 :1.0;
 
     is_has_yaw_ = true;
 

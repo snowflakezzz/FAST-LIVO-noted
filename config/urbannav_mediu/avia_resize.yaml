@@ -9,6 +9,7 @@ grid_size : 20  # 40
 patch_size : 4   # 8
 img_enable : 1 #1
 lidar_enable : 1
+loop_enable : 1
 outlier_threshold : 300 # 78 100 156
 ncc_en: false
 ncc_thre: 0
@@ -47,7 +48,7 @@ gnss:
     extrinsic: [0,0,0]
 
 pcd_save:
-    pcd_save_en: true
+    pcd_save_en: false
 
 camera:
     img_topic: /zed2/camera/left/image_raw
@@ -56,7 +57,40 @@ camera:
           0.0478764,    0.998823,   -0.007835]
     Pcl: [-0.121309, 2.72499, 0.678238]
 
-    # Pic: [-8.4994249456545504e-02, 6.6169337079143220e-01, -3.0104266183335913e+00]
-    # Ric: [9.9885234402635936e-01, 1.3591158885981787e-03, 4.7876378696062108e-02, 
-    #              -4.7864188349269129e-02, -7.9091258538426246e-03, 9.9882253939420773e-01, 
-    #             1.7361758877140372e-03, -9.9996779874765440e-01,-7.8349959194297103e-03]
+std:
+    # pre process
+    ds_size: 0.1
+    maximum_corner_num: 100
+
+    # key points
+    plane_detection_thre: 0.01
+    plane_merge_normal_thre: 0.1
+    plane_merge_dis_thre: 0.3
+    voxel_size: 2
+    voxel_init_num: 10
+    proj_image_resolution: 0.5
+    proj_dis_min: 0
+    proj_dis_max: 5
+    corner_thre: 10
+
+    # std descriptor
+    descriptor_near_num: 20
+    descriptor_min_len: 2
+    descriptor_max_len: 30
+    non_max_suppression_radius: 2
+    std_side_resolution: 0.2
+
+    # candidate search
+    skip_near_num: 50
+    candidate_num: 50
+    sub_frame_num: 10
+    vertex_diff_threshold: 0.5
+    rough_dis_threshold: 0.01
+    normal_threshold: 0.2
+    dis_threshold: 0.5
+    icp_threshold: 0.5
+
+lightglue:
+    lightglue_path: /home/zxq/Documents/02base/fastlivo/src/FAST-LIVO-noted/config/weight/superpoint_lightglue.onnx
+    extractor_path: /home/zxq/Documents/02base/fastlivo/src/FAST-LIVO-noted/config/weight/superpoint.onnx
+    mask_path: /home/zxq/Documents/02base/fastlivo/src/FAST-LIVO-noted/include/LightGlue/mask.jpg

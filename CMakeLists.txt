@@ -4,7 +4,6 @@ project(fast_livo)
 SET(CMAKE_BUILD_TYPE "Debug")
 
 ADD_COMPILE_OPTIONS(-std=c++17 )
-ADD_COMPILE_OPTIONS(-std=c++17 )
 set( CMAKE_CXX_FLAGS "-std=c++14 -O3" ) 
 
 add_definitions(-DROOT_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/\")

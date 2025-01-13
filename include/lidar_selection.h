@@ -106,7 +106,7 @@ class LidarSelector {
     
     pcl::VoxelGrid<PointType> downSizeFilter;
     unordered_map<VOXEL_KEY, VOXEL_POINTS*> feat_map;     // 视觉点云地图
-    unordered_map<VOXEL_KEY, float> sub_feat_map;         // 记录各个voxel块中点的数量
+    unordered_map<VOXEL_KEY, float> sub_feat_map;         // 记录当前帧各个voxel块中点的数量
     unordered_map<int, Warp*> Warp_map;                   // 记录每个特征点对应的参考帧reference frame id, A_cur_ref and search_level
 
     vector<PointPtr> voxel_points_;

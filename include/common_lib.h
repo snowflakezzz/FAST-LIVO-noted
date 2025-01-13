@@ -140,7 +140,7 @@ inline gtsam::Pose3 Mat2gtsamPose3(cv::Mat &R, cv::Mat &t){
 inline void plotMatches(const cv::Mat &figure, const std::vector<cv::Point2f> &kpts0,
                  const std::vector<cv::Point2f> &kpts1, int x_offset = 0,
                  std::vector<double> ratios = {1.0f, 1.0f}, const cv::Scalar &color = cv::Scalar(0, 255, 0),
-                 float lw = 2, int ps = 2)
+                 float lw = 1, int ps = 2)
 {
     assert(kpts0.size() == kpts1.size());
     if (lw > 0)
@@ -196,7 +196,7 @@ inline cv::Mat plotImages(const std::vector<cv::Mat> &Images,
         double totalRatio = std::accumulate(ratios.begin(), ratios.end(), 0.0);
         double figureWidth = totalRatio * 4.5;
         cv::Size2f figureSize((static_cast<double>(figureWidth)) * dpi, 4.5 * dpi);
-        cv::Mat figure(figureSize, CV_8UC1);
+        cv::Mat figure(figureSize, CV_8UC3);
 
         auto kpts0 = kpts_pair.first;
         auto kpts1 = kpts_pair.second;
