@@ -20,6 +20,7 @@ delta_time: 0.0         # camera与lidar时偏 =lidar时间 - camera时间
 gnss:
     gnss_en: 1           # 是否使用gnss观测
     extrinsic: [0,0,0]
+    use_ros: 1
 
 common:
     lid_topic:  "/velodyne_points"

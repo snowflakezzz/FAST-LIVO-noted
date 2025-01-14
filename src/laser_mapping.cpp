@@ -987,9 +987,12 @@ void LaserMapping::readParameters(ros::NodeHandle &nh)
 
     if(bgnss_en){
         p_gnss = std::make_shared<GNSSProcessing>(nh);
-        string gnss_path;
-        nh.param<string>("gnss/path", gnss_path, "");
-        if(!gnss_path.empty()) p_gnss->readrtkresult(gnss_path);
+        string gnss_path; int use_ros;
+        nh.param<int>("gnss/use_ros", use_ros, 0);
+        if(!use_ros){
+            nh.param<string>("gnss/path", gnss_path, "");
+            p_gnss->readrtkresult(gnss_path);
+        }
     }
 
     if(loop_en){

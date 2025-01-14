@@ -78,17 +78,17 @@ public:
         sinlon = sin(blh[1]);
 
         Matrix3d dcm;
-        dcm(0, 0) = -sinlat * coslon;
-        dcm(0, 1) = -sinlon;
-        dcm(0, 2) = -coslat * coslon;
+        dcm(0, 0) = -sinlon;
+        dcm(0, 1) = -sinlat * coslon;
+        dcm(0, 2) = coslat * coslon;
 
-        dcm(1, 0) = -sinlat * sinlon;
-        dcm(1, 1) = coslon;
-        dcm(1, 2) = -coslat * sinlon;
+        dcm(1, 0) = coslon;
+        dcm(1, 1) = -sinlat * sinlon;
+        dcm(1, 2) = coslat * sinlon;
 
-        dcm(2, 0) = coslat;
-        dcm(2, 1) = 0;
-        dcm(2, 2) = -sinlat;
+        dcm(2, 0) = 0;
+        dcm(2, 1) = coslat;
+        dcm(2, 2) = sinlat;
 
         return dcm;
     }
@@ -110,7 +110,11 @@ public:
     }
 
     static void gps2unix(int week, double sow, double &unixs) {
+        #ifdef MINI
+        unixs = sow + week * 604800;    // mini中已经将lidar时间转化为gpst保存
+        #else
         unixs = sow + week * 604800 + 315964800 - GPS_LEAP_SECOND;
+        #endif
     };
 
     static void unix2gps(double unixs, int &week, double &sow) {

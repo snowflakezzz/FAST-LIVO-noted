@@ -34,17 +34,21 @@ void GNSSProcessing::input_gnss(const sensor_msgs::NavSatFix::ConstPtr& msg_in)
 {
     if(msg_in->status.status < 0) return;  // 不使用非固定解
 
-    if(!is_origin_set){
-        anchor_ = Vector3d(msg_in->latitude, msg_in->longitude, msg_in->altitude);      // deg
-        anchor_ = D2R * anchor_;
-        // G_m_s2  = earth::gravity(anchor_);
-        is_origin_set = true;
-    }
-
     GNSS gnss;
     gnss.time = msg_in->header.stamp.toSec();
-    gnss.blh  = Earth::global2local(anchor_, D2R * Vector3d(msg_in->latitude, msg_in->longitude, msg_in->altitude));
+    gnss.blh  = Earth::blh2ecef(D2R * Vector3d(msg_in->latitude, msg_in->longitude, msg_in->altitude));
+    // gnss.blh  = Earth::global2local(anchor_, D2R * Vector3d(msg_in->latitude, msg_in->longitude, msg_in->altitude));
     gnss.std  = Vector3d(msg_in->position_covariance[0], msg_in->position_covariance[4], msg_in->position_covariance[8]);
+
+    // if(!is_origin_set){
+    //     anchor_ = gnss.blh;
+    //     is_origin_set = true;
+    // }
+    // auto enu = Earth::ecef2local(anchor_, gnss.blh);
+    // ofstream fout(DEBUG_FILE_DIR("gnss_urban.txt"),ios::app);
+    // fout << fixed << setprecision(3) << gnss.time << " " << enu.x() << " "
+    //     << enu.y() << " " << enu.z() << " 0 0 0 0" << endl;
+    // fout.close();
 
     gnss_mutex_.lock();
     gnss_queue_.push(gnss);
@@ -101,15 +105,15 @@ void GNSSProcessing::readrtkresult(const string gnss_path){
             col++;
         }
 
-        if(!is_origin_set){
-            anchor_ = ecef;
-            is_origin_set = true;
-        }
-
         if(AR>=3){
             GNSS gnss;
             Earth::gps2unix(week, sow, gnss.time);
-            gnss.blh  = Earth::ecef2local(anchor_, ecef);
+            // std::cout << std::fixed << std::setprecision(3) << gnss.time << " ";
+            gnss.blh  = ecef;
+            // std::fstream fout(DEBUG_FILE_DIR("gnss.txt"),ios::app);
+            // fout << std::fixed << std::setprecision(3) << gnss.time << " " << gnss.blh.x() << " " << gnss.blh.y() << " " << gnss.blh.z()
+            //     << " 0 0 0 0" << std::endl;
+            // fout.close();
             gnss.std  = enustd;
             gnss_mutex_.lock();
             gnss_queue_.push(gnss);
@@ -129,12 +133,17 @@ void GNSSProcessing::input_path(const double &cur_time, const Eigen::Vector3d &p
     odo_path_[time] = pos;
 
     while(!gnss_queue_.empty()){
-        GNSS gnss_msg = gnss_queue_.front();
+        GNSS &gnss_msg = gnss_queue_.front();
         double gnss_t = gnss_msg.time;
+        if(!is_origin_set && gnss_t >= time-1 && gnss_t < time+1){
+            anchor_ = gnss_msg.blh;
+            is_origin_set = true;
+        }
 
         if(gnss_t < time)
             gnss_queue_.pop();
         else if(gnss_t <= time+0.05){
+            gnss_msg.blh = Earth::ecef2local(anchor_, gnss_msg.blh);
             new_gnss_ = true;
             break;
         }
@@ -166,14 +175,17 @@ void GNSSProcessing::addIMUpos(const vector<Pose6D> &IMUpose, const double pcl_b
             if(gnss_t >= time-0.01 && gnss_t <= time+0.01){     // 阈值依据imu频率设定
                 // 去除gnss飞点
                 Eigen::Vector3d odo_pos(VEC_FROM_ARRAY(item.pos));
-                if(0){      //is_has_yaw_
+                if(is_has_yaw_){      //is_has_yaw_
                     Eigen::Vector3d gnss_pos = common::gnss_trans(gnss_msg.blh, yaw_);
-                    if(common::calc_dist(odo_pos, gnss_pos)>3){
+                    // gnss_pos = gnss_msg.blh;
+                    // if(common::calc_dist(odo_pos, gnss_pos)>3){
                         ofstream fout(DEBUG_FILE_DIR("delta.txt"),ios::app);
-                        fout << fixed << setprecision(3) << odo_pos.transpose() << "; " << gnss_pos.transpose() << "; " << common::calc_dist(odo_pos, gnss_pos) << endl;
+                        double dis = std::abs(odo_pos.squaredNorm() - gnss_pos.squaredNorm());
+                        fout << fixed << setprecision(3) << odo_pos.transpose() << "; " << gnss_pos.transpose() << "; " << common::calc_dist(odo_pos, gnss_pos)
+                            << "; " << dis << endl;
                         fout.close();
                         break;
-                    }
+                    // }
                 }
 
                 odo_path_[time] = odo_pos;
@@ -217,7 +229,7 @@ void GNSSProcessing::Initialization()
     Vector3d dir = gnss_vel.cross(odo_vel);
     double cos_yaw = gnss_vel.dot(odo_vel) / (gnss_vel.norm() * odo_vel.norm());
     yaw_ = acos(cos_yaw);
-    yaw_ *= dir.y()>0? -1.0 :1.0;
+    yaw_ *= dir.y()>0? 1.0 :-1.0;
 
     is_has_yaw_ = true;
 

@@ -315,7 +315,7 @@ namespace std
 struct GNSS
 {
     double time = -1.0;
-    Vector3d blh;
+    Vector3d blh;           // enu坐标系
     Vector3d std;
 };
 
