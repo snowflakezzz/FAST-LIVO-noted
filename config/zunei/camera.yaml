@@ -1,0 +1,8 @@
+cam_model: ATAN     # atan模型进行鱼眼相机去畸变
+cam_width: 1280
+cam_height: 1024
+cam_fx: 863.4241
+cam_fy: 863.4171
+cam_cx: 640.6808
+cam_cy: 518.3392
+cam_d0: -0.1080       # omega畸变参数，用于描述镜头的畸变程度

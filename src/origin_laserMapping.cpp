@@ -70,6 +70,7 @@
 #include <sensor_msgs/NavSatFix.h>
 #include <cv_bridge/cv_bridge.h>
 #include "GNSS_Processing.h"
+#include <fstream>
 
 #ifdef USE_ikdtree
     #ifdef USE_ikdforest
@@ -193,7 +194,7 @@ V3F XAxisPoint_world(LIDAR_SP_LEN, 0.0, 0.0);
 V3D euler_cur;
 V3D position_last(Zero3d);
 Eigen::Matrix3d Rcl;
-Eigen::Vector3d Pcl;
+Eigen::Vector3d Tcl;
 
 //estimator inputs and output;
 LidarMeasureGroup LidarMeasures;
@@ -1081,23 +1082,12 @@ void readParameters(ros::NodeHandle &nh)
     nh.param<vector<double>>("mapping/extrinsic_T", extrinT, vector<double>());
     nh.param<vector<double>>("mapping/extrinsic_R", extrinR, vector<double>());
 
-    if(nh.hasParam("camera/Pcl") && nh.hasParam("camera/Rcl")){
-        nh.param<vector<double>>("camera/Pcl", cameraextrinT, vector<double>());
-        nh.param<vector<double>>("camera/Rcl", cameraextrinR, vector<double>());
-    }
-    else if(nh.hasParam("camera/extrinsic_T") && nh.hasParam("camera/extrinsic_R")){
-        nh.param<vector<double>>("camera/extrinsic_T", cameraextrinT, vector<double>());
-        nh.param<vector<double>>("camera/extrinsic_R", cameraextrinR, vector<double>());
-        M3D Ric, Ril, Rcl; V3D Tic, Til, Tcl;
-        Ric << MAT_FROM_ARRAY(cameraextrinR);
-        Tic << VEC_FROM_ARRAY(cameraextrinT);
-        Ril << MAT_FROM_ARRAY(extrinR);
-        Til << VEC_FROM_ARRAY(extrinT);
-        Rcl = Ril * Ric.transpose();
-        Tcl = Ric * (Tic - Til);
-        std::copy(Rcl.data(), Rcl.data()+Rcl.size(), cameraextrinR.begin());
-        std::copy(Tcl.data(), Tcl.data()+Tcl.size(), cameraextrinT.begin());
-    }
+    // 如果运行了mini.launch，则其对应的yaml参数会被存到 ROS 参数服务器中，则该值始终为1，后面再运行urbannav.launch也会用mini的外参
+    // 所以只能在不同终端运行不同的程序
+    nh.param<vector<double>>("camera/Pcl", cameraextrinT, vector<double>());
+    nh.param<vector<double>>("camera/Rcl", cameraextrinR, vector<double>());
+    Rcl << MAT_FROM_ARRAY(cameraextrinR);
+    Tcl << VEC_FROM_ARRAY(cameraextrinT);
 
     nh.param<int>("grid_size", grid_size, 40);
     nh.param<int>("patch_size", patch_size, 4);
@@ -1211,7 +1201,7 @@ int main(int argc, char** argv)
     lidar_selector->patch_size = patch_size;
     lidar_selector->outlier_threshold = outlier_threshold;
     lidar_selector->ncc_thre = ncc_thre;
-    lidar_selector->sparse_map->set_camera2lidar(cameraextrinR, cameraextrinT);
+    lidar_selector->sparse_map->set_camera2lidar(Rcl, Tcl);
     lidar_selector->set_extrinsic(Lidar_offset_to_IMU, Lidar_rot_to_IMU);
     lidar_selector->state = &state;
     lidar_selector->state_propagat = &state_propagat;
@@ -1247,10 +1237,12 @@ int main(int argc, char** argv)
     string pos_log_dir = root_dir + "/Log/pos_log.txt";
     fp = fopen(pos_log_dir.c_str(),"w");
 
-    ofstream fout_pre, fout_out, fout_dbg;
+    ofstream fout_pre, fout_out, fout_dbg, pathout;
     fout_pre.open(DEBUG_FILE_DIR("mat_pre.txt"),ios::out);
     fout_out.open(DEBUG_FILE_DIR("mat_out.txt"),ios::out);      // 优化后的位姿结果
     fout_dbg.open(DEBUG_FILE_DIR("dbg.txt"),ios::out);
+    pathout.open(DEBUG_FILE_DIR("tum.txt"), std::ios::out);
+
     // if (fout_pre && fout_out)
     //     cout << "~~~~"<<ROOT_DIR<<" file opened" << endl;
     // else
@@ -1366,6 +1358,11 @@ int main(int argc, char** argv)
                 
                 geoQuat = tf::createQuaternionMsgFromRollPitchYaw(euler_cur(0), euler_cur(1), euler_cur(2));
                 publish_odometry(pubOdomAftMapped);
+
+                pathout << std::fixed << std::setprecision(6) << LidarMeasures.last_update_time << " " << std::setprecision(9) //
+                        << state.pos_end(0) << " " << state.pos_end(1) << " " << state.pos_end(2) << " " //
+                        << geoQuat.x << " " << geoQuat.y << " " << geoQuat.z << " " << geoQuat.w << std::endl;
+
                 euler_cur = RotMtoEuler(state.rot_end);
                 fout_out << fixed << setprecision(6) << setw(20) << LidarMeasures.last_update_time << " " << euler_cur.transpose()*R2D << " " << state.pos_end.transpose() << " " << state.vel_end.transpose() \
                 <<" "<<state.bias_g.transpose()<<" "<<state.bias_a.transpose()<<" "<<state.gravity.transpose()<<" "<<feats_undistort->points.size()<<endl;
@@ -1662,6 +1659,10 @@ int main(int argc, char** argv)
         geoQuat = tf::createQuaternionMsgFromRollPitchYaw(euler_cur(0), euler_cur(1), euler_cur(2));
         publish_odometry(pubOdomAftMapped);
 
+        pathout << std::fixed << std::setprecision(6) << LidarMeasures.last_update_time << " " << std::setprecision(9) //
+                << state.pos_end(0) << " " << state.pos_end(1) << " " << state.pos_end(2) << " " //
+                << geoQuat.x << " " << geoQuat.y << " " << geoQuat.z << " " << geoQuat.w << std::endl;
+
         /*** add the feature points to map kdtree ***/
         t3 = omp_get_wtime();
         map_incremental();
@@ -1729,6 +1730,8 @@ int main(int argc, char** argv)
         }
         // dump_lio_state_to_log(fp);
     }
+
+    pathout.close();
 
          /**************** save map ****************/
     /* 1. make sure you have enough memories

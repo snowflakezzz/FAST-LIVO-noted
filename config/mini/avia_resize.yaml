@@ -18,7 +18,7 @@ laser_point_cov : 0.001 # 0.001
 delta_time: 0.0
 gnss:
     path: "/media/zxq/T5/01graduate/01data/mini_24-07-02/gnss_result_100C.ffp"   # 如果不设置该值就默认从ros包中获取gnss数据
-    gnss_en: 1           # 是否使用gnss观测
+    gnss_en: 0           # 是否使用gnss观测
     use_ros: 0           # 是否从ros包中获取gnss数据
 
 common:

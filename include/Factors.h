@@ -22,7 +22,8 @@ public:
 
         Eigen::Map<Eigen::Matrix<double, 3, 1>> error(residuals);
 
-        error = p + lever_ - common::gnss_trans(gnss_.blh, yaw_);
+        // error = p + lever_ - common::gnss_trans(gnss_.blh, yaw_);
+        error = p + lever_ - gnss_.blh;
 
         // ofstream fout(DEBUG_FILE_DIR("residual.txt"), std::ios::app);
         // fout << "gnss factor residual: " << error.transpose() << endl;

@@ -36,7 +36,7 @@ void GNSSProcessing::input_gnss(const sensor_msgs::NavSatFix::ConstPtr& msg_in)
 
     GNSS gnss;
     gnss.time = msg_in->header.stamp.toSec();
-    gnss.blh  = Earth::blh2ecef(D2R * Vector3d(msg_in->latitude, msg_in->longitude, msg_in->altitude));
+    gnss.blh  = Earth::blh2ecef(Vector3d(D2R * msg_in->latitude, D2R * msg_in->longitude, msg_in->altitude));
     // gnss.blh  = Earth::global2local(anchor_, D2R * Vector3d(msg_in->latitude, msg_in->longitude, msg_in->altitude));
     gnss.std  = Vector3d(msg_in->position_covariance[0], msg_in->position_covariance[4], msg_in->position_covariance[8]);
 
@@ -162,7 +162,7 @@ void GNSSProcessing::addIMUpos(const vector<Pose6D> &IMUpose, const double pcl_b
         double gnss_t = gnss_msg.time;
 
         // 如果两次gnss观测距离较近，就不使用本次gnss观测
-        if(last_gnss_time_!=-1 && common::calc_dist(gnss_msg.blh, last_gnss_.blh) < 5){
+        if(last_gnss_time_!=-1 && common::calc_dist(gnss_msg.blh, last_gnss_.blh) < 10){
             new_gnss_ = false;
             gnss_mutex_.unlock();
             odo_mutex_.unlock();
@@ -175,18 +175,18 @@ void GNSSProcessing::addIMUpos(const vector<Pose6D> &IMUpose, const double pcl_b
             if(gnss_t >= time-0.01 && gnss_t <= time+0.01){     // 阈值依据imu频率设定
                 // 去除gnss飞点
                 Eigen::Vector3d odo_pos(VEC_FROM_ARRAY(item.pos));
-                if(is_has_yaw_){      //is_has_yaw_
-                    Eigen::Vector3d gnss_pos = common::gnss_trans(gnss_msg.blh, yaw_);
-                    // gnss_pos = gnss_msg.blh;
+                // if(is_has_yaw_){      //is_has_yaw_
+                //     Eigen::Vector3d gnss_pos;// = common::gnss_trans(gnss_msg.blh, yaw_);
+                //     gnss_pos = gnss_msg.blh;
                     // if(common::calc_dist(odo_pos, gnss_pos)>3){
-                        ofstream fout(DEBUG_FILE_DIR("delta.txt"),ios::app);
-                        double dis = std::abs(odo_pos.squaredNorm() - gnss_pos.squaredNorm());
-                        fout << fixed << setprecision(3) << odo_pos.transpose() << "; " << gnss_pos.transpose() << "; " << common::calc_dist(odo_pos, gnss_pos)
-                            << "; " << dis << endl;
-                        fout.close();
-                        break;
+                    //     ofstream fout(DEBUG_FILE_DIR("delta.txt"),ios::app);
+                    //     double dis = std::abs(odo_pos.norm() - gnss_pos.norm());
+                    //     fout << fixed << setprecision(3) << odo_pos.transpose() << "; " << gnss_pos.transpose() << "; " << common::calc_dist(odo_pos, gnss_pos)
+                    //         << "; " << dis << endl;
+                    //     fout.close();
+                    //     break;
                     // }
-                }
+                // }
 
                 odo_path_[time] = odo_pos;
                 gnss_buffer_[time] = gnss_msg;
@@ -229,7 +229,7 @@ void GNSSProcessing::Initialization()
     Vector3d dir = gnss_vel.cross(odo_vel);
     double cos_yaw = gnss_vel.dot(odo_vel) / (gnss_vel.norm() * odo_vel.norm());
     yaw_ = acos(cos_yaw);
-    yaw_ *= dir.y()>0? 1.0 :-1.0;
+    yaw_ *= dir.y()>0? -1.0 :1.0;
 
     is_has_yaw_ = true;
 
@@ -237,7 +237,7 @@ void GNSSProcessing::Initialization()
     fout << fixed << setprecision(3) << "endtime: " << end_time << " gnss begin pos: " << gnss_begin->second.blh.transpose() << endl << "odo begin pos: " << odo_begin->second.transpose() << endl;
     
     fout << fixed << setprecision(3) << "gnss vel: " << gnss_vel.transpose() << endl << "odo vel: " << odo_vel.transpose() << endl;
-    fout << fixed << setprecision(3) << begin_time << " yaw: " << yaw_ << endl;
+    fout << fixed << setprecision(3) << begin_time << " yaw: " << yaw_*180/PI_M << endl;
     fout.close();
 }
 
@@ -346,8 +346,11 @@ bool GNSSProcessing::optimize(){
             // for(auto iter_odo=odo_path_.begin(); iter_odo != odo_path_.end(); iter_odo++, i++){
             //     iter_odo->second = Vector3d(t_array[i][0], t_array[i][1], t_array[i][2]);
             // }
+            ofstream fout(DEBUG_FILE_DIR("delta.txt"),ios::app);
+            fout << fixed << setprecision(3) << gnss_buffer_.size() << endl;
+            fout.close();
 
-            if(gnss_buffer_.size() >= 100){
+            if(gnss_buffer_.size() >= 10){
                 // gnss_buffer_.clear();
                 i = 0; std::ofstream outfile;
                 outfile.open(DEBUG_FILE_DIR("gnss_odo.txt"), std::ios::out);

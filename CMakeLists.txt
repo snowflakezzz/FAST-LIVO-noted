@@ -14,7 +14,7 @@ add_definitions(-w)
 # add_definitions(-DMINI)
 # add_definitions(-DUSE_ikdtree)
 # add_definitions(-DSAVE_PLY)
-# add_definitions(-DUSE_FOV_Checker)
+# add_definitions(-DSAVE_IMG)
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fexceptions" )
 set(CMAKE_CXX_STANDARD 17)
@@ -113,6 +113,7 @@ link_directories("${ONNXRUNTIME_ROOTDIR}/lib")
 
 add_library(std include/STD/STDesc.cpp
                 include/LightGlue/LightGlueDecoupleOnnxRunner.cpp
+                # include/ikd-Tree/ikd_Tree.cpp
                     )
 
 add_library(vio src/lidar_selection.cpp

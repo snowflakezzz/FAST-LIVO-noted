@@ -113,6 +113,7 @@ class LidarSelector {
     vector<V3D> add_voxel_points_;
 
     cv::Mat img_cp, img_rgb;
+    int img_ind = 0;      // 用于图片输出名称
     unordered_map<int, cv::Mat> imgs_;                     // 存储历史图像，用于patch块去畸变
     FramePtr new_frame_;                                   // 新图像观测帧
     Map map_;

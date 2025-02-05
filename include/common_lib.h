@@ -82,9 +82,12 @@ inline float calc_dist(const PointType &p1, const PointType &p2) {
     return (p1.x - p2.x) * (p1.x - p2.x) + (p1.y - p2.y) * (p1.y - p2.y) + (p1.z - p2.z) * (p1.z - p2.z);
 }
 
-inline float calc_dist(const Eigen::Vector3f &p1, const Eigen::Vector3f &p2) { return (p1 - p2).squaredNorm(); }
+inline float calc_dist(const Eigen::Vector3f &p1, const Eigen::Vector3f &p2) { return (p1 - p2).norm(); }
 
-inline float calc_dist(const Eigen::Vector3d &p1, const Eigen::Vector3d &p2) { return (p1 - p2).squaredNorm(); }
+inline float calc_dist(const Eigen::Vector3d &p1, const Eigen::Vector3d &p2) { 
+    // return (p1 - p2).norm();
+    return std::sqrt((p1.x()-p2.x())*(p1.x()-p2.x()) + (p1.y()-p2.y())*(p1.y()-p2.y()));
+}
 
 inline Vector3d gnss_trans(const Eigen::Vector3d &p, const double yaw) {
     Eigen::Matrix3d R_gnss_odo;

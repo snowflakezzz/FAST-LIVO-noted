@@ -563,6 +563,8 @@ void LaserMapping::h_share_model(MatrixXd &HPH, VectorXd &HPL)
     // step5 计算观测雅各比
     HPH.resize(6, 6); HPH.setZero();
     HPL.resize(6); HPL.setZero();
+    Eigen::MatrixXd h_geo_last;    // for caulate degenarate drection
+    h_geo_last.resize(effct_feat_num, 3);
 
     for (int i = 0; i < effct_feat_num; i++)
     {
@@ -583,9 +585,37 @@ void LaserMapping::h_share_model(MatrixXd &HPH, VectorXd &HPL)
         Hsub << VEC_FROM_ARRAY(A), norm_p.x, norm_p.y, norm_p.z;
         HPH += Hsub.transpose() * Hsub;
 
+        h_geo_last.block<1, 3>(i, 0) << norm_p.x, norm_p.y, norm_p.z;
+
         /*** Measuremnt: distance to the closest surface/corner ***/
         double error = - norm_p.intensity;
         HPL += Hsub.transpose() * error;
+    }
+
+    // step6 计算退化方向
+    std::vector<V3D> weak_directions_g;
+    if(effct_feat_num > 3) {
+        // step6.1 计算特征值和特征向量
+        Eigen::MatrixXd HTH = h_geo_last.transpose() * h_geo_last; 
+        Eigen::SelfAdjointEigenSolver<Eigen::Matrix<double, 3,3>> solve(HTH);
+        Eigen::Matrix3d eig_vec = solve.eigenvectors().real();
+        
+        // step6.2 计算各特征向量对应方向上的约束情况
+        V3D contrib = V3D::Zero();
+        for(size_t feat_idx = 0; feat_idx < effct_feat_num; feat_idx++){
+            for(size_t dir_idx = 0; dir_idx < 3; dir_idx++){
+                V3D feat_row = h_geo_last.row(feat_idx).transpose();
+                feat_row.normalize();
+                V3D dir = eig_vec.col(dir_idx);
+                const float dotp = fabs(feat_row.dot(dir));
+                if(dotp > 0.5) contrib(dir_idx) += dotp;
+            }
+        }
+
+        for(int idx = 0; idx < 3; idx++){
+            if(contrib(idx) < 25)
+                weak_directions_g.push_back(eig_vec.col(idx));
+        }
     }
 }
 #endif
@@ -1065,8 +1095,10 @@ void LaserMapping::add_odofactor(){
         gtSAMgraph.add(gtsam::PriorFactor<gtsam::Pose3>(0, common::trans2gtsamPose3(state.rot_end, state.pos_end), priorNoise));
         initialEstimate.insert(0, common::trans2gtsamPose3(state.rot_end, state.pos_end));
     } else{
+        // 用距离的倒数加权
+        double d_pos = 1.0 / (last_state.pos_end - state.pos_end).norm();
         gtsam::noiseModel::Diagonal::shared_ptr odometryNoise = gtsam::noiseModel::Diagonal::Variances(
-            (gtsam::Vector(6) << 1e-6, 1e-6, 1e-6, 1e-4, 1e-4, 1e-4).finished());
+            (gtsam::Vector(6) << 1e-6*d_pos, 1e-6*d_pos, 1e-6*d_pos, 1e-4*d_pos, 1e-4*d_pos, 1e-4*d_pos).finished());
         gtsam::Pose3 poseFrom = common::trans2gtsamPose3(last_state.rot_end, last_state.pos_end);
         gtsam::Pose3 poseTo = common::trans2gtsamPose3(state.rot_end, state.pos_end);
         gtSAMgraph.add(gtsam::BetweenFactor<gtsam::Pose3>(keyframe_count_ - 1, keyframe_count_, poseFrom.between(poseTo), odometryNoise));
@@ -1252,9 +1284,10 @@ void LaserMapping::loop_detect(){
                 cv::Mat R, t;
                 cv::recoverPose(E, points1, points2, K, R, t);
 
+                double d_pos = 1.0 / std::sqrt((t.at<double>(0, 0))*(t.at<double>(0, 0)) + 
+                                (t.at<double>(1, 0))*(t.at<double>(1, 0)) + (t.at<double>(2, 0))*(t.at<double>(2, 0)));
                 gtsam::Vector Vector6(6);
-                Vector6 << 0.1, 0.1, 0.1,
-                        0.1, 0.1, 0.1;
+                Vector6 << 1e-6*d_pos, 1e-6*d_pos, 1e-6*d_pos, 1e-4*d_pos, 1e-4*d_pos, 1e-4*d_pos;
                 // Vector6 << search_result.second, search_result.second, search_result.second,
                 //         search_result.second, search_result.second, search_result.second;
                 gtsam::noiseModel::Diagonal::shared_ptr constraint_noise = gtsam::noiseModel::Diagonal::Variances(Vector6);
@@ -1271,47 +1304,6 @@ void LaserMapping::loop_detect(){
         cloudInd++;
     }
 }
-
-// void LaserMapping::publish_loop_marker(std::vector<std::pair<int, int>> &loop_container)
-// {
-//     if(loop_container.empty())
-//         return;
-    
-//     visualzation_msgs::MarkerArray marker_array;
-//     visualzation_msgs::Marker markerNode;
-//     markerNode.header.frame_id = "camera_init";
-//     markerNode.action = visualzation_msgs::Marker::ADD;
-//     markerNode.type = visualzation_msgs::Marker::SPHERE_LIST;
-//     markerNode.ns = "loop_nodes";
-//     markerNode.id = 0;
-//     markerNode.pose.orientation.w = 1;
-//     markerNode.scale.x = 0.3;
-//     markerNode.scale.y = 0.3;
-//     markerNode.scale.z = 0.3;
-//     markerNode.color.r = 0;
-//     markerNode.color.g = 0.8;
-//     markerNode.color.b = 1;
-//     markerNode.color.a = 1;
-
-//     // 闭环边
-//     visualization_msgs::Marker markerEdge;
-//     markerEdge.header.frame_id = "camera_init";
-//     markerEdge.action = visualization_msgs::Marker::ADD;
-//     markerEdge.type = visualization_msgs::Marker::LINE_LIST;
-//     markerEdge.ns = "loop_edges";
-//     markerEdge.id = 1;
-//     markerEdge.pose.orientation.w = 1;
-//     markerEdge.scale.x = 0.1;
-//     markerEdge.color.r = 0.9;
-//     markerEdge.color.g = 0.9;
-//     markerEdge.color.b = 0;
-//     markerEdge.color.a = 1;
-    
-//     // 没存pose 还不好可视化！
-//     // for(auto &loop_pair : loop_container)
-    
-//     pubLoopConstraintEdge.publish(marker_array);
-// }
 
 void LaserMapping::publish_frame_world_rgb()
 {
@@ -1359,8 +1351,9 @@ void LaserMapping::publish_frame_world_rgb()
                 
                 #ifdef SAVE_PLY
                 std::stringstream filename;
-                filename << "/home/zxq/Documents/03data/plyfile/" << std::fixed << std::setprecision(0) << LidarMeasures.last_update_time * 1e6 << ".ply";
-                pcl::io::savePLYFileBinary(filename.str(), *laserCloudWorldRGB);
+                filename << "/home/zxq/Documents/03data/pcd/" << std::fixed << std::setprecision(0) << LidarMeasures.last_update_time * 1e6 << ".pcd";
+                // pcl::io::savePLYFileBinary(filename.str(), *laserCloudWorldRGB);
+                pcl::io::savePCDFileBinary(filename.str(), *laserCloudWorldRGB);
                 #endif
 
                 std::unique_lock<std::mutex> lock(m_loop_rady);

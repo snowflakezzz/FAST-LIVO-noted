@@ -332,7 +332,10 @@ void LidarSelector::createPatchFromPatchWithBorder(float* patch_with_border, flo
 void LidarSelector::addFromSparseMap(cv::Mat img, PointCloudXYZI::Ptr pg)
 {
     if(feat_map.size()<=0) return;
-    // double ts0 = omp_get_wtime();
+    
+    #ifdef SAVE_IMG
+    cv::Mat out_img = img_rgb.clone();
+    #endif
 
     // step1 点云降采样
     PointCloudXYZI::Ptr pg_down(new PointCloudXYZI());
@@ -466,6 +469,10 @@ void LidarSelector::addFromSparseMap(cv::Mat img, PointCloudXYZI::Ptr pg)
             V2D pc(new_frame_->w2c(pt->pos_));
             V3D pt_cam(new_frame_->w2f(pt->pos_));
 
+            #ifdef SAVE_IMG
+            cv::circle(out_img, cv::Point(pc(0), pc(1)), 2, cv::Scalar(0, 0, 255), -1);
+            #endif
+
             // step4.1 判断当前特征点的深度是否连续 true表示不连续，舍弃该特征
             bool depth_continous = false;
             for (int u=-patch_size_half; u<=patch_size_half; u++)
@@ -552,6 +559,10 @@ void LidarSelector::addFromSparseMap(cv::Mat img, PointCloudXYZI::Ptr pg)
             }
             // 如果两patch块光度误差大于阈值，则不使用该特征
             if(error > outlier_threshold*patch_size_total) continue;
+
+            #ifdef SAVE_IMG
+            cv::circle(out_img, cv::Point(pc(0), pc(1)), 2, cv::Scalar(0, 255, 0), -1);
+            #endif
             
             sub_map_cur_frame_.push_back(pt);
 
@@ -562,11 +573,19 @@ void LidarSelector::addFromSparseMap(cv::Mat img, PointCloudXYZI::Ptr pg)
             sub_sparse_map->index.push_back(i);  //index
             sub_sparse_map->voxel_points.push_back(pt);
             sub_sparse_map->patch.push_back(patch_wrap);
-            // sub_sparse_map->px_cur.push_back(pc);
-            // sub_sparse_map->propa_px_cur.push_back(pc);
             // t_5 += omp_get_wtime() - t_1;
         }
     }
+
+    #ifdef SAVE_IMG
+    if(img_ind % 10 == 0){
+        string out_path = "/media/zxq/T5/01graduate/03result/image_feature/";
+        out_path += std::to_string(img_ind);
+        out_path += ".jpg";
+        cv::imwrite(out_path, out_img);
+    }
+    img_ind++;
+    #endif
     // double t3 = omp_get_wtime();
     // cout<<"C. addSubSparseMap: "<<t3-t2<<endl;
     // cout<<"depthcontinuous: C1 "<<t_2<<" C2 "<<t_3<<" C3 "<<t_4<<" C4 "<<t_5<<endl;

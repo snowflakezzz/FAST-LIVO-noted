@@ -235,7 +235,7 @@ private:
     unordered_map<int, double> key_time;         // 存储关键帧对应的时间戳
     bool bloop_closed = false;
 
-    std::queue<pcl::PointCloud<pcl::PointXYZI>::Ptr> key_cloud_queue;   // 存储关键帧点云队列
-
+    std::queue<pcl::PointCloud<pcl::PointXYZI>::Ptr> key_cloud_queue;   // 用于loop detector存储关键帧点云队列
+    std::vector<V3D>  weak_directions_g;
 };
 #endif

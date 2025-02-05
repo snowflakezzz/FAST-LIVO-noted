@@ -126,6 +126,7 @@ int Preprocess::uv2index(const int &u, const int &v){
   return uv_index[tmp];
 }
 
+#ifdef NORMAL
 void Preprocess::extract_normal(){
   if(1){
     normal_img = cv::Mat(N_SCANS, hor_pixel_num, CV_8UC3, cv::Scalar(0, 0, 0));
@@ -243,7 +244,7 @@ void Preprocess::extract_normal(){
   }
 
 }
-
+#endif
 
 void Preprocess::avia_handler(const livox_ros_driver::CustomMsg::ConstPtr &msg)
 {
@@ -268,10 +269,11 @@ void Preprocess::avia_handler(const livox_ros_driver::CustomMsg::ConstPtr &msg)
   {
     for(uint i=1; i<plsize; i++)
     {
+        double range = msg->points[i].x * msg->points[i].x + msg->points[i].y * msg->points[i].y;
         if((abs(msg->points[i].x - msg->points[i-1].x) < 1e-8) 
             || (abs(msg->points[i].y - msg->points[i-1].y) < 1e-8)
             || (abs(msg->points[i].z - msg->points[i-1].z) < 1e-8)
-            || (msg->points[i].x * msg->points[i].x + msg->points[i].y * msg->points[i].y < blind)
+            || (range < blind) || (range > 10)   // 为了建图好看，这里把距离限制在5m以内
             || (msg->points[i].line > N_SCANS)
             || ((msg->points[i].tag & 0x30) != RETURN0AND1))
         {
@@ -313,10 +315,11 @@ void Preprocess::avia_handler(const livox_ros_driver::CustomMsg::ConstPtr &msg)
     int index = 0;
     for(uint i=1; i<plsize; i++)
     {
+        double range = msg->points[i].x * msg->points[i].x + msg->points[i].y * msg->points[i].y;
         if((abs(msg->points[i].x - msg->points[i-1].x) < 1e-8) 
             || (abs(msg->points[i].y - msg->points[i-1].y) < 1e-8)
             || (abs(msg->points[i].z - msg->points[i-1].z) < 1e-8)
-            || (msg->points[i].x * msg->points[i].x + msg->points[i].y * msg->points[i].y < blind)
+            || (range < blind) || (range > 900)   // 为了建图好看，这里把距离限制在10m以内
             || (msg->points[i].line > N_SCANS)
             || ((msg->points[i].tag & 0x30) != RETURN0AND1))
         {
