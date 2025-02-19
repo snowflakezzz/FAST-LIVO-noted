@@ -165,9 +165,9 @@ void ImuProcess::IMU_init(const MeasureGroup &meas, StatesGroup &state_inout, in
   if(is_zero_velocity)
   {
     Vector3d gdir = Vector3d(0, 0, 1.0);  // imu朝向右前上
-    #ifdef MINI
-    gdir = Vector3d(-1.0, 0, 0);  // mini的imu朝向非常奇怪 下右后
-    #endif
+    // #ifdef MINI
+    // gdir = Vector3d(-1.0, 0, 0);  // mini的imu朝向非常奇怪 下右后
+    // #endif
     state_inout.gravity = -1.0 * gdir * G_m_s2;  // UndistortPcl
 
     // 首帧调整为水平方向，todo：杆臂也得调整

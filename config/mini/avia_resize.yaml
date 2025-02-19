@@ -17,8 +17,9 @@ img_point_cov : 100 # 1000
 laser_point_cov : 0.001 # 0.001
 delta_time: 0.0
 gnss:
-    path: "/media/zxq/T5/01graduate/01data/mini_24-07-02/gnss_result_100C.ffp"   # 如果不设置该值就默认从ros包中获取gnss数据
-    gnss_en: 0           # 是否使用gnss观测
+    path: "/media/zxq/T5/01graduate/01data/mini/friend_square/rtk/gps_serial_node_2024_04_29_04_37_42.ffp"   # 如果不设置该值就默认从ros包中获取gnss数据
+    gnss_en: 1           # 是否使用gnss观测
+    extrinsic: [0,-0.120,0.118361]    # Tia a：GNSS接收机 i：imu为中心右前上坐标
     use_ros: 0           # 是否从ros包中获取gnss数据
 
 common:
@@ -37,11 +38,14 @@ preprocess:
 mapping:
     acc_cov_scale: 100
     gyr_cov_scale: 10000
-    # imu to lidar
+    # imu to lidar Ril Pil
     extrinsic_T: [0,0,0.03411] # horizon 0.05512, 0.02226, -0.0297
-    extrinsic_R: [ 0, 0, -1,
-                   0, -1, 0,
-                   -1, 0, 0]
+    extrinsic_R: [ 0, -1, 0,    # 右前上 to lidar
+                   1, 0, 0,
+                   0, 0, 1]
+    # extrinsic_R: [ 0, 0, -1, # imu to lidar
+    #                0, -1, 0,
+    #                -1, 0, 0]
 
 pcd_save:
     pcd_save_en: true
@@ -49,7 +53,7 @@ pcd_save:
 camera:
     img_topic: /cam00/image_raw/compressed
     # camera to lidar
-    Rcl: [-0.0579369,   -0.998305, -0.00553725,
-         0.0195925,  0.00440848,   -0.999798,
-          0.998128,  -0.0580337,   0.0193038]
-    Pcl: [0.045215, -0.137394, -0.167492]
+    Rcl: [0.01930383, -0.99979833, -0.00553725,
+         -0.05803366,  0.00440848, -0.99830489,
+          0.99812798,  0.01959246, -0.05793686]
+    Pcl: [0.13322392, -0.03404434, -0.17242587]

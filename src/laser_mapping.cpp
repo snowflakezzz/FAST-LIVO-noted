@@ -843,13 +843,23 @@ void LaserMapping::imu_cbk(const sensor_msgs::Imu::ConstPtr &msg_in)
     last_timestamp_imu = timestamp;
 
     #ifdef MINI
-    // adjust for mini
+    // adjust for mini 乘频率
     msg->linear_acceleration.x *= 200;
     msg->linear_acceleration.y *= 200;
     msg->linear_acceleration.z *= 200;
     msg->angular_velocity.x *= 200;
     msg->angular_velocity.y *= 200;
     msg->angular_velocity.z *= 200;
+
+    // mini安置角转换 0 90 -90 即由imu系转到右前上坐标系的旋转角
+    double tmp = msg->linear_acceleration.x;
+    msg->linear_acceleration.x = -msg->linear_acceleration.y;
+    msg->linear_acceleration.y = msg->linear_acceleration.z;
+    msg->linear_acceleration.z = -tmp;
+    tmp = msg->angular_velocity.x;
+    msg->angular_velocity.x = -msg->angular_velocity.y;
+    msg->angular_velocity.y = msg->angular_velocity.z;
+    msg->angular_velocity.z = -tmp;
     #endif
 
     imu_buffer.push_back(msg);

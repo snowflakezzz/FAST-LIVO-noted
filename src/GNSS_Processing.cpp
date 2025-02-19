@@ -74,7 +74,7 @@ void GNSSProcessing::readrtkresult(const string gnss_path){
     string value; stringstream ss(line);
     while(ss >> value){
         if(value == "Week") col_idx.push_back(col+1);
-        else if(value == "GPSTime") col_idx.push_back(col+1);  // 时间有两个值 所以要+1跳过
+        else if(value == "GPSTime") col_idx.push_back(col+1);  // Data有两个值 所以要+1跳过
         else if(value == "X-ECEF") col_idx.push_back(col+1);
         else if(value == "Y-ECEF") col_idx.push_back(col+1);
         else if(value == "Z-ECEF") col_idx.push_back(col+1);

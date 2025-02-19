@@ -50,7 +50,7 @@ private:
     bool                is_origin_set;  // 是否已经设置了锚点
     bool                is_has_yaw_;    // 是否有yaw角
     double              yaw_;           // gnss to odo的航偏角
-    Vector3d            antlever_;      // 杆臂
+    Vector3d            antlever_;      // 杆臂 Tia 右前上坐标系到gnss接收机天线
 
     bool                new_gnss_;
     bool                ready_comp_;    // 是否准备好解算

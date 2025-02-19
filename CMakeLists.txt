@@ -11,7 +11,7 @@ add_definitions(-DROOT_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/\")
 add_definitions(-w)
 # add_definitions(-DUSE_IMG)
 # add_definitions(-DUSE_VGICP)
-# add_definitions(-DMINI)
+add_definitions(-DMINI)
 # add_definitions(-DUSE_ikdtree)
 # add_definitions(-DSAVE_PLY)
 # add_definitions(-DSAVE_IMG)
@@ -107,7 +107,8 @@ catkin_package(
   INCLUDE_DIRS include
 )
 
-set(ONNXRUNTIME_ROOTDIR "/home/zxq/Documents/01ThirdParty/onnxruntime-linux-x64-gpu-1.15.0")
+# set(ONNXRUNTIME_ROOTDIR "/home/zxq/Documents/01ThirdParty/onnxruntime-linux-x64-gpu-1.15.0")
+set(ONNXRUNTIME_ROOTDIR "/home/zxq/Documents/09Thirdparty/onnxruntime-linux-x64-1.14.1")
 include_directories("${ONNXRUNTIME_ROOTDIR}/include")
 link_directories("${ONNXRUNTIME_ROOTDIR}/lib")
 
