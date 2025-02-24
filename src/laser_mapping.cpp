@@ -23,10 +23,12 @@ LaserMapping::LaserMapping()
     flg_first_scan = true;
 
     pathout.open(DEBUG_FILE_DIR("tum.txt"), std::ios::out);
+    fout_out.open(DEBUG_FILE_DIR("mat_out.txt"), std::ios::out);
 }
 
 LaserMapping::~LaserMapping(){ 
     pathout.close();
+    fout_out.close();
     if(loop_en){
         thread_loop_.detach();//join();
     }
@@ -185,12 +187,12 @@ void LaserMapping::Run(){
 
             // step5.2 误差状态卡尔曼滤波更新
             auto &&HTz = HTL;
-            H_T_H.block<6,6>(0,0) = HTH;
+            H_T_H.block<9,9>(0,0) = HTH;
             MD(DIM_STATE, DIM_STATE) &&K_1 = \
-                    (H_T_H + (state.cov / LASER_POINT_COV).inverse()).inverse();
-            G.block<DIM_STATE,6>(0,0) = K_1.block<DIM_STATE,6>(0,0) * H_T_H.block<6,6>(0,0);
+                    (H_T_H + (state.cov).inverse()).inverse();
+            G.block<DIM_STATE,9>(0,0) = K_1.block<DIM_STATE,9>(0,0) * H_T_H.block<9,9>(0,0);
             auto vec = state_propagat - state;
-            solution = K_1.block<DIM_STATE,6>(0,0) * HTz + vec - G.block<DIM_STATE,6>(0,0) * vec.block<6,1>(0,0);
+            solution = K_1.block<DIM_STATE,9>(0,0) * HTz + vec - G.block<DIM_STATE,9>(0,0) * vec.block<9,1>(0,0);
         
             int minRow, minCol;
             if(0)//if(V.minCoeff(&minRow, &minCol) < 1.0f)
@@ -239,6 +241,9 @@ void LaserMapping::Run(){
             }
             if (EKF_stop_flg) break;
         }
+
+        fout_out << fixed << setprecision(6) << setw(20) << LidarMeasures.last_update_time << " " << euler_cur.transpose()*R2D << " " << state.pos_end.transpose() << " " << state.vel_end.transpose() \
+        <<" "<<state.bias_g.transpose()<<" "<<state.bias_a.transpose()<<" "<<state.gravity.transpose()<<" "<<feats_undistort->points.size()<<endl;
     }
 
     euler_cur = RotMtoEuler(state.rot_end);
@@ -561,10 +566,10 @@ void LaserMapping::h_share_model(MatrixXd &HPH, VectorXd &HPL)
     res_mean_last = total_residual / effct_feat_num;
 
     // step5 计算观测雅各比
-    HPH.resize(6, 6); HPH.setZero();
-    HPL.resize(6); HPL.setZero();
-    Eigen::MatrixXd h_geo_last;    // for caulate degenarate drection
-    h_geo_last.resize(effct_feat_num, 3);
+    HPH.resize(9, 9); HPH.setZero();
+    HPL.resize(9); HPL.setZero();
+    // Eigen::MatrixXd h_geo_last;    // for caulate degenarate drection
+    // h_geo_last.resize(effct_feat_num, 3);
 
     for (int i = 0; i < effct_feat_num; i++)
     {
@@ -583,40 +588,56 @@ void LaserMapping::h_share_model(MatrixXd &HPH, VectorXd &HPL)
 
         Eigen::Matrix<double, 1, 6> Hsub;
         Hsub << VEC_FROM_ARRAY(A), norm_p.x, norm_p.y, norm_p.z;
-        HPH += Hsub.transpose() * Hsub;
+        HPH.block<6,6>(0,0) += Hsub.transpose() * (1.0/LASER_POINT_COV) * Hsub;
 
-        h_geo_last.block<1, 3>(i, 0) << norm_p.x, norm_p.y, norm_p.z;
+        // h_geo_last.block<1, 3>(i, 0) << norm_p.x, norm_p.y, norm_p.z;
 
         /*** Measuremnt: distance to the closest surface/corner ***/
         double error = - norm_p.intensity;
-        HPL += Hsub.transpose() * error;
+        HPL.block<6,1>(0,0) += Hsub.transpose() * (1.0/LASER_POINT_COV) * error;
     }
 
-    // step6 计算退化方向
-    std::vector<V3D> weak_directions_g;
-    if(effct_feat_num > 3) {
-        // step6.1 计算特征值和特征向量
-        Eigen::MatrixXd HTH = h_geo_last.transpose() * h_geo_last; 
-        Eigen::SelfAdjointEigenSolver<Eigen::Matrix<double, 3,3>> solve(HTH);
-        Eigen::Matrix3d eig_vec = solve.eigenvectors().real();
+    // 考虑非完整性约束NHC 即速度约束 state是现在的估计值
+    Eigen::Vector3d vel_imu = state.rot_end.transpose()*state.vel_end;
+    Eigen::Matrix3d vel_skew; vel_skew << SKEW_SYM_MATRX(state.vel_end);  // 反对称矩阵
+    vel_skew = -1.0*state.rot_end.transpose()*vel_skew;
+    Eigen::Matrix<double, 2, 9> Hsub;
+    Hsub.block<1,3>(0,0) = vel_skew.row(0);    // 关于旋转的雅各比
+    Hsub.block<1,3>(1,0) = vel_skew.row(2);
+    Hsub.block<1,3>(0,6) = state.rot_end.transpose().row(0);   // 对于速度的雅各比
+    Hsub.block<1,3>(1,6) = state.rot_end.transpose().row(2);
+    Eigen::Vector2d error;  // x z方向的速度，即右 上方的速度应该为0
+    error(0)=vel_imu(0);  error(1)=vel_imu(2);
+    Eigen::Matrix2d NHC_P = Eigen::Matrix2d::Identity();
+    // NHC_P *= 1.0/10;
+    HPH += Hsub.transpose()*NHC_P*Hsub;
+    HPL += Hsub.transpose()*NHC_P*error;
+
+    // // step6 计算退化方向
+    // std::vector<V3D> weak_directions_g;
+    // if(effct_feat_num > 3) {
+    //     // step6.1 计算特征值和特征向量
+    //     Eigen::MatrixXd HTH = h_geo_last.transpose() * h_geo_last; 
+    //     Eigen::SelfAdjointEigenSolver<Eigen::Matrix<double, 3,3>> solve(HTH);
+    //     Eigen::Matrix3d eig_vec = solve.eigenvectors().real();
         
-        // step6.2 计算各特征向量对应方向上的约束情况
-        V3D contrib = V3D::Zero();
-        for(size_t feat_idx = 0; feat_idx < effct_feat_num; feat_idx++){
-            for(size_t dir_idx = 0; dir_idx < 3; dir_idx++){
-                V3D feat_row = h_geo_last.row(feat_idx).transpose();
-                feat_row.normalize();
-                V3D dir = eig_vec.col(dir_idx);
-                const float dotp = fabs(feat_row.dot(dir));
-                if(dotp > 0.5) contrib(dir_idx) += dotp;
-            }
-        }
+    //     // step6.2 计算各特征向量对应方向上的约束情况
+    //     V3D contrib = V3D::Zero();
+    //     for(size_t feat_idx = 0; feat_idx < effct_feat_num; feat_idx++){
+    //         for(size_t dir_idx = 0; dir_idx < 3; dir_idx++){
+    //             V3D feat_row = h_geo_last.row(feat_idx).transpose();
+    //             feat_row.normalize();
+    //             V3D dir = eig_vec.col(dir_idx);
+    //             const float dotp = fabs(feat_row.dot(dir));
+    //             if(dotp > 0.5) contrib(dir_idx) += dotp;
+    //         }
+    //     }
 
-        for(int idx = 0; idx < 3; idx++){
-            if(contrib(idx) < 25)
-                weak_directions_g.push_back(eig_vec.col(idx));
-        }
-    }
+    //     for(int idx = 0; idx < 3; idx++){
+    //         if(contrib(idx) < 25)
+    //             weak_directions_g.push_back(eig_vec.col(idx));
+    //     }
+    // }
 }
 #endif
 
@@ -795,11 +816,12 @@ void LaserMapping::standard_pcl_cbk(const sensor_msgs::PointCloud2::ConstPtr &ms
     PointCloudXYZI::Ptr  ptr(new PointCloudXYZI());
     p_pre->process(msg, ptr);
     // ROS_INFO("get point cloud at time: %.6f and size: %d", msg->header.stamp.toSec() - 0.1, ptr->points.size());
-    printf("[ INFO ]: get point cloud at time: %.6f and size: %d.\n", msg->header.stamp.toSec(), int(ptr->points.size()));
+    double time = msg->header.stamp.toSec();
+    printf("[ INFO ]: get point cloud at time: %.6f and size: %d.\n", time, int(ptr->points.size()));
     lidar_buffer.push_back(ptr);
     // time_buffer.push_back(msg->header.stamp.toSec() - 0.1);
     // last_timestamp_lidar = msg->header.stamp.toSec() - 0.1;
-    time_buffer.push_back(msg->header.stamp.toSec());
+    time_buffer.push_back(time);
     last_timestamp_lidar = msg->header.stamp.toSec();
     mtx_buffer.unlock();
     sig_buffer.notify_all();
@@ -853,13 +875,17 @@ void LaserMapping::imu_cbk(const sensor_msgs::Imu::ConstPtr &msg_in)
 
     // mini安置角转换 0 90 -90 即由imu系转到右前上坐标系的旋转角
     double tmp = msg->linear_acceleration.x;
-    msg->linear_acceleration.x = -msg->linear_acceleration.y;
-    msg->linear_acceleration.y = msg->linear_acceleration.z;
+    msg->linear_acceleration.x = msg->linear_acceleration.y;
+    msg->linear_acceleration.y = -msg->linear_acceleration.z;
     msg->linear_acceleration.z = -tmp;
     tmp = msg->angular_velocity.x;
-    msg->angular_velocity.x = -msg->angular_velocity.y;
-    msg->angular_velocity.y = msg->angular_velocity.z;
+    msg->angular_velocity.x = msg->angular_velocity.y;
+    msg->angular_velocity.y = -msg->angular_velocity.z;
     msg->angular_velocity.z = -tmp;
+
+    // std::ofstream fout_vel;
+    // fout_vel.open(DEBUG_FILE_DIR("imu_vel.txt"), std::ios::app);
+    // fout_vel << fixed << setprecision(6) << setw(20) << timestamp << " " << msg->linear_acceleration.x << " " << msg->linear_acceleration.y << " " << msg->linear_acceleration.z << std::endl;
     #endif
 
     imu_buffer.push_back(msg);
@@ -888,6 +914,9 @@ void LaserMapping::img_cbk(const sensor_msgs::ImageConstPtr& msg)
     img_buffer.push_back(img);
     img_time_buffer.push_back(msg_header_time);
     last_timestamp_img = msg_header_time;
+
+    // string imagepath = "/media/zxq/T5/01graduate/01data/mini/garbage/forcalib/image/"+to_string(msg_header_time)+".jpg";
+    // cv::imwrite(imagepath, img);
 
     mtx_buffer.unlock();
     sig_buffer.notify_all();
@@ -1361,7 +1390,7 @@ void LaserMapping::publish_frame_world_rgb()
                 
                 #ifdef SAVE_PLY
                 std::stringstream filename;
-                filename << "/home/zxq/Documents/03data/pcd/" << std::fixed << std::setprecision(0) << LidarMeasures.last_update_time * 1e6 << ".pcd";
+                filename << "/media/zxq/T5/01graduate/01data/mini/friend_square/lidar_scan/" << std::fixed << std::setprecision(0) << LidarMeasures.last_update_time * 1e6 << ".pcd";
                 // pcl::io::savePLYFileBinary(filename.str(), *laserCloudWorldRGB);
                 pcl::io::savePCDFileBinary(filename.str(), *laserCloudWorldRGB);
                 #endif
@@ -1386,7 +1415,7 @@ void LaserMapping::publish_frame_world_rgb()
     /**************** save map ****************/
     /* 1. make sure you have enough memories
     /* 2. noted that pcd save will influence the real-time performences **/
-    if (pcd_save_en) *pcl_wait_save += *laserCloudWorldRGB;          
+    if (pcd_save_en) *pcl_wait_save += *laserCloudWorldRGB;
 }
 
 void LaserMapping::publish_odometry()

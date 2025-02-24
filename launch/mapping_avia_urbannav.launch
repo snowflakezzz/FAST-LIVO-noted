@@ -8,9 +8,9 @@
 		<rosparam file="$(find fast_livo)/config/urbannav/camera.yaml" />
 	</node>
 	
-	<group if="$(arg rviz)">
+	<!-- <group if="$(arg rviz)">
 		<node launch-prefix="nice" pkg="rviz" type="rviz" name="rviz" args="-d $(find fast_livo)/rviz_cfg/loam_livox.rviz" />
-	</group>
+	</group> -->
 	<!-- <node pkg="image_transport" type="republish" name="republish" args="compressed in:=/cam00/image_raw/compressed raw out:=/cam00/image_raw" output="screen" respawn="true"/> -->
 	
 launch-prefix="gdb -ex run --args"

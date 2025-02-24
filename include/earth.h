@@ -123,5 +123,13 @@ public:
         week = std::floor(seconds / 604800);
         sow  = seconds - week * 604800;
     };
+
+    static Vector3d global2enu(Vector3d gpos, double &yaw) {
+        Matrix3d Rz;
+        Rz << std::cos(yaw), -std::sin(yaw), 0,
+            std::sin(yaw), std::cos(yaw), 0,
+            0, 0, 1;
+        return Rz*gpos;
+    }
 };
 #endif

@@ -110,10 +110,10 @@ void GNSSProcessing::readrtkresult(const string gnss_path){
             Earth::gps2unix(week, sow, gnss.time);
             // std::cout << std::fixed << std::setprecision(3) << gnss.time << " ";
             gnss.blh  = ecef;
-            // std::fstream fout(DEBUG_FILE_DIR("gnss.txt"),ios::app);
-            // fout << std::fixed << std::setprecision(3) << gnss.time << " " << gnss.blh.x() << " " << gnss.blh.y() << " " << gnss.blh.z()
-            //     << " 0 0 0 0" << std::endl;
-            // fout.close();
+            std::fstream fout(DEBUG_FILE_DIR("gnss.txt"),ios::app);
+            fout << std::fixed << std::setprecision(3) << gnss.time << " " << gnss.blh.x() << " " << gnss.blh.y() << " " << gnss.blh.z()
+                << " 0 0 0 0" << std::endl;
+            fout.close();
             gnss.std  = enustd;
             gnss_mutex_.lock();
             gnss_queue_.push(gnss);
@@ -143,7 +143,7 @@ void GNSSProcessing::input_path(const double &cur_time, const Eigen::Vector3d &p
         if(gnss_t < time)
             gnss_queue_.pop();
         else if(gnss_t <= time+0.05){
-            gnss_msg.blh = Earth::ecef2local(anchor_, gnss_msg.blh);
+            gnss_msg.blh = Earth::ecef2local(anchor_, gnss_msg.blh);    // ecef转到enu坐标系
             new_gnss_ = true;
             break;
         }
@@ -162,7 +162,7 @@ void GNSSProcessing::addIMUpos(const vector<Pose6D> &IMUpose, const double pcl_b
         double gnss_t = gnss_msg.time;
 
         // 如果两次gnss观测距离较近，就不使用本次gnss观测
-        if(last_gnss_time_!=-1 && common::calc_dist(gnss_msg.blh, last_gnss_.blh) < 10){
+        if(last_gnss_time_!=-1 && common::calc_dist(gnss_msg.blh, last_gnss_.blh) < 1){
             new_gnss_ = false;
             gnss_mutex_.unlock();
             odo_mutex_.unlock();
@@ -170,7 +170,7 @@ void GNSSProcessing::addIMUpos(const vector<Pose6D> &IMUpose, const double pcl_b
         }
 
         for(auto item : IMUpose){
-            double time = pcl_beg_time + item.offset_time;
+            double time = pcl_beg_time + item.offset_time;  // imu扫描帧时间
 
             if(gnss_t >= time-0.01 && gnss_t <= time+0.01){     // 阈值依据imu频率设定
                 // 去除gnss飞点
@@ -188,7 +188,7 @@ void GNSSProcessing::addIMUpos(const vector<Pose6D> &IMUpose, const double pcl_b
                     // }
                 // }
 
-                odo_path_[time] = odo_pos;
+                odo_path_[time] = odo_pos;      // global系
                 gnss_buffer_[time] = gnss_msg;
                 last_gnss_ = gnss_msg;
                 last_gnss_time_ = time;
@@ -225,7 +225,7 @@ void GNSSProcessing::Initialization()
     auto odo_end = odo_path_.find(end_time);
     Vector3d odo_vel = odo_end->second - odo_begin->second;
 
-    // 计算yaw角大小及方向 gnss到odo
+    // 计算yaw角大小及方向 由gnss对应x轴转到odo对应x轴的角度 位移矢量法粗对准
     Vector3d dir = gnss_vel.cross(odo_vel);
     double cos_yaw = gnss_vel.dot(odo_vel) / (gnss_vel.norm() * odo_vel.norm());
     yaw_ = acos(cos_yaw);
@@ -280,6 +280,7 @@ bool GNSSProcessing::optimize(){
 
         ceres::Solver::Summary summary;
         ceres::LossFunction *loss_function = new ceres::HuberLoss(1.0);
+        ceres::LocalParameterization* local_parameterization = new ceres::QuaternionParameterization();
 
         odo_mutex_.lock();
         gnss_mutex_.lock();
@@ -336,6 +337,10 @@ bool GNSSProcessing::optimize(){
             }
 
             ceres::Solve(options, &problem, &summary);
+
+            // // 计算优化后残差
+            // double total_cost = 0.0;
+            // problem.Evaluate(ceres::Problem::EvaluateOptions(), )
             // int index = t_array.size()-1;
             // cur_pos = Vector3d(t_array[index][0], t_array[index][1], t_array[index][2]);    // 方差怎么修改？
         
@@ -346,9 +351,9 @@ bool GNSSProcessing::optimize(){
             // for(auto iter_odo=odo_path_.begin(); iter_odo != odo_path_.end(); iter_odo++, i++){
             //     iter_odo->second = Vector3d(t_array[i][0], t_array[i][1], t_array[i][2]);
             // }
-            ofstream fout(DEBUG_FILE_DIR("delta.txt"),ios::app);
-            fout << fixed << setprecision(3) << gnss_buffer_.size() << endl;
-            fout.close();
+            // ofstream fout(DEBUG_FILE_DIR("delta.txt"),ios::app);
+            // fout << fixed << setprecision(3) << gnss_buffer_.size() << endl;
+            // fout.close();
 
             if(gnss_buffer_.size() >= 10){
                 // gnss_buffer_.clear();

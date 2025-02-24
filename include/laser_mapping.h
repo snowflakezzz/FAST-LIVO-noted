@@ -218,6 +218,7 @@ private:
     bool nearest_search_en;                     // 判断是否要进行最近临点搜索
 
     ofstream pathout;
+    ofstream fout_out;
 
     // 多线程相关参数
     std::condition_variable loop_cv;
