@@ -92,7 +92,7 @@ inline float calc_dist(const Eigen::Vector3d &p1, const Eigen::Vector3d &p2) {
 inline Vector3d gnss_trans(const Eigen::Vector3d &p, const double yaw) {
     Eigen::Matrix3d R_gnss_odo;
     R_gnss_odo << cos(yaw), -sin(yaw), 0, sin(yaw), cos(yaw), 0, 0, 0, 1;
-    return R_gnss_odo * p;
+    return R_gnss_odo.transpose() * p;
 }
 
 template <typename PointT>
@@ -594,7 +594,7 @@ struct StatesGroup
     }
 
 	M3D rot_end;      // the estimated attitude (rotation matrix) at the end lidar point Rgi
-    V3D pos_end;      // the estimated position at the end lidar point (world frame)     pgi
+    V3D pos_end;      // the estimated position at the end lidar point (world frame)    pgi
     V3D vel_end;      // the estimated velocity at the end lidar point (world frame)
     V3D bias_g;       // gyroscope bias
     V3D bias_a;       // accelerator bias

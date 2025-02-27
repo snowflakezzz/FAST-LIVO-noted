@@ -56,7 +56,7 @@ void LaserMapping::Run(){
 
     // step2 imu初始化，点云去畸变到雷达扫描结束或图像帧处
     p_imu->Process2(LidarMeasures, state, feats_undistort); 
-    state_propagat = state;
+    state_propagat = state; // 验前值
 
     if (lidar_selector->debug) LidarMeasures.debug_show();
 
@@ -81,7 +81,7 @@ void LaserMapping::Run(){
 
     if(bgnss_en)
         p_gnss->addIMUpos(p_imu->IMUpose, p_imu->start_timestamp_);
-    
+            
     // step3 处理视觉观测信息，在lidar_selector中进行视觉追踪、位姿优化
     if (!LidarMeasures.is_lidar_end) 
     {
@@ -120,7 +120,7 @@ void LaserMapping::Run(){
             publish_odometry();
             euler_cur = RotMtoEuler(state.rot_end);
 
-            if(bgnss_en) p_gnss->input_path(LidarMeasures.last_update_time, state.pos_end);
+            // if(bgnss_en) p_gnss->input_path(LidarMeasures.last_update_time, state.pos_end);
         }
         return;
     }
@@ -181,18 +181,16 @@ void LaserMapping::Run(){
             MatrixXd HTH;  VectorXd HTL;
             h_share_model(HTH, HTL);
 
-            MatrixXd K(DIM_STATE, effct_feat_num);
             EKF_stop_flg = false;
             flg_EKF_converged = false;
 
             // step5.2 误差状态卡尔曼滤波更新
-            auto &&HTz = HTL;
             H_T_H.block<9,9>(0,0) = HTH;
             MD(DIM_STATE, DIM_STATE) &&K_1 = \
                     (H_T_H + (state.cov).inverse()).inverse();
             G.block<DIM_STATE,9>(0,0) = K_1.block<DIM_STATE,9>(0,0) * H_T_H.block<9,9>(0,0);
             auto vec = state_propagat - state;
-            solution = K_1.block<DIM_STATE,9>(0,0) * HTz + vec - G.block<DIM_STATE,9>(0,0) * vec.block<9,1>(0,0);
+            solution = K_1.block<DIM_STATE,9>(0,0) * HTL + vec - G.block<DIM_STATE,9>(0,0) * vec.block<9,1>(0,0);
         
             int minRow, minCol;
             if(0)//if(V.minCoeff(&minRow, &minCol) < 1.0f)
@@ -233,9 +231,6 @@ void LaserMapping::Run(){
                     position_last = state.pos_end;
                     geoQuat = tf::createQuaternionMsgFromRollPitchYaw           // 更新后的姿态
                                 (euler_cur(0), euler_cur(1), euler_cur(2));
-
-                    VD(DIM_STATE) K_sum  = K.rowwise().sum();
-                    VD(DIM_STATE) P_diag = state.cov.diagonal();
                 }
                 EKF_stop_flg = true;
             }
@@ -250,7 +245,7 @@ void LaserMapping::Run(){
     geoQuat = tf::createQuaternionMsgFromRollPitchYaw(euler_cur(0), euler_cur(1), euler_cur(2));
     publish_odometry();
     
-    if(bgnss_en) p_gnss->input_path(LidarMeasures.last_update_time, state.pos_end);
+    // if(bgnss_en) p_gnss->input_path(LidarMeasures.last_update_time, state.pos_end);
 
     t3 = omp_get_wtime();
     map_incremental();
@@ -574,7 +569,7 @@ void LaserMapping::h_share_model(MatrixXd &HPH, VectorXd &HPL)
     for (int i = 0; i < effct_feat_num; i++)
     {
         const PointType &laser_p  = laserCloudOri->points[i];
-        V3D point_this(laser_p.x, laser_p.y, laser_p.z);
+        V3D point_this(laser_p.x, laser_p.y, laser_p.z);        // lidar系下
         point_this = Lidar_rot_to_IMU*point_this + Lidar_offset_to_IMU;
         M3D point_crossmat;
         point_crossmat<<SKEW_SYM_MATRX(point_this);
@@ -597,21 +592,29 @@ void LaserMapping::h_share_model(MatrixXd &HPH, VectorXd &HPL)
         HPL.block<6,1>(0,0) += Hsub.transpose() * (1.0/LASER_POINT_COV) * error;
     }
 
-    // 考虑非完整性约束NHC 即速度约束 state是现在的估计值
-    Eigen::Vector3d vel_imu = state.rot_end.transpose()*state.vel_end;
-    Eigen::Matrix3d vel_skew; vel_skew << SKEW_SYM_MATRX(state.vel_end);  // 反对称矩阵
-    vel_skew = -1.0*state.rot_end.transpose()*vel_skew;
-    Eigen::Matrix<double, 2, 9> Hsub;
-    Hsub.block<1,3>(0,0) = vel_skew.row(0);    // 关于旋转的雅各比
-    Hsub.block<1,3>(1,0) = vel_skew.row(2);
-    Hsub.block<1,3>(0,6) = state.rot_end.transpose().row(0);   // 对于速度的雅各比
-    Hsub.block<1,3>(1,6) = state.rot_end.transpose().row(2);
-    Eigen::Vector2d error;  // x z方向的速度，即右 上方的速度应该为0
-    error(0)=vel_imu(0);  error(1)=vel_imu(2);
-    Eigen::Matrix2d NHC_P = Eigen::Matrix2d::Identity();
-    // NHC_P *= 1.0/10;
-    HPH += Hsub.transpose()*NHC_P*Hsub;
-    HPL += Hsub.transpose()*NHC_P*error;
+    // // 考虑非完整性约束NHC 即速度约束 state是现在的估计值
+    // Eigen::Vector3d vel_imu = state.rot_end.transpose()*state.vel_end;
+    // Eigen::Matrix3d vel_skew; vel_skew << SKEW_SYM_MATRX(state.vel_end);  // 反对称矩阵
+    // vel_skew = -1.0*state.rot_end.transpose()*vel_skew;
+    // Eigen::Matrix<double, 2, 9> Hsub;
+    // Hsub.block<1,3>(0,0) = vel_skew.row(0);    // 关于旋转的雅各比
+    // Hsub.block<1,3>(1,0) = vel_skew.row(2);
+    // Hsub.block<1,3>(0,6) = state.rot_end.transpose().row(0);   // 对于速度的雅各比
+    // Hsub.block<1,3>(1,6) = state.rot_end.transpose().row(2);
+    // Eigen::Vector2d error;  // x z方向的速度，即右 上方的速度应该为0
+    // error(0)=vel_imu(0);  error(1)=vel_imu(2);
+    // Eigen::Matrix2d NHC_P = Eigen::Matrix2d::Identity();
+    // // NHC_P *= 1.0/10;
+    // HPH += Hsub.transpose()*NHC_P*Hsub;
+    // HPL += Hsub.transpose()*NHC_P*error;
+
+    // 添加gnss观测
+    if(bgnss_en && p_gnss->new_gnss_){
+        Eigen::MatrixXd gnss_HPH, gnss_HPL;
+        p_gnss->computeH(gnss_HPH, gnss_HPL, state.rot_end, state.pos_end);
+        HPH.block<6,6>(0,0) += gnss_HPH;
+        HPL.block<6,1>(0,0) += gnss_HPL;
+    }
 
     // // step6 计算退化方向
     // std::vector<V3D> weak_directions_g;
@@ -1045,7 +1048,6 @@ void LaserMapping::readParameters(ros::NodeHandle &nh)
     lidar_selector->set_extrinsic(Lidar_offset_to_IMU, Lidar_rot_to_IMU);
     lidar_selector->state = &state;
     lidar_selector->state_propagat = &state_propagat;
-    lidar_selector->NUM_MAX_ITERATIONS = NUM_MAX_ITERATIONS;
     lidar_selector->img_point_cov = IMG_POINT_COV;
     lidar_selector->fx = cam_fx;
     lidar_selector->fy = cam_fy;
@@ -1062,6 +1064,8 @@ void LaserMapping::readParameters(ros::NodeHandle &nh)
             nh.param<string>("gnss/path", gnss_path, "");
             p_gnss->readrtkresult(gnss_path);
         }
+        p_gnss->state = &state;
+        p_gnss->state_propagat = &state_propagat;
     }
 
     if(loop_en){

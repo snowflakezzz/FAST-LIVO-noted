@@ -187,8 +187,8 @@ void ImuProcess::IMU_init(const MeasureGroup &meas, StatesGroup &state_inout, in
     // cov_acc = cov_acc * pow(G_m_s2 / mean_acc.norm(), 2);
     // cov_acc = cov_acc.cwiseProduct(cov_acc_scale);
     // cov_gyr = cov_gyr.cwiseProduct(cov_gyr_scale);
-    cov_acc = V3D(0.5, 0.5, 0.5);
-    cov_gyr = V3D(0.3, 0.3, 0.3);
+    cov_acc = V3D(0.01, 0.01, 0.01);
+    cov_gyr = V3D(0.01, 0.01, 0.01);
 
     cov_bias_gyr = V3D(0.0001, 0.0001, 0.0001);
     cov_bias_acc = V3D(0.0001, 0.0001, 0.0001);
@@ -259,7 +259,7 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
                 0.5 * (head->linear_acceleration.z + tail->linear_acceleration.z);
 
     // #ifdef DEBUG_PRINT
-      fout_imu << setw(10) << head->header.stamp.toSec() - first_lidar_time << " " << angvel_avr.transpose() << " " << acc_avr.transpose() << endl;
+    fout_imu << setw(10) << head->header.stamp.toSec() - first_lidar_time << " " << angvel_avr.transpose() << " " << acc_avr.transpose() << endl;
     // #endif
 
     // 零偏修正
@@ -367,7 +367,7 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
 
       V3D P_i(it_pcl->x, it_pcl->y, it_pcl->z);
       V3D P_compensate = (extR_Ri * (R_i * (Lid_rot_to_IMU * P_i + Lid_offset_to_IMU) + T_ei) - exrR_extT);
-
+      // Lid_rot_to_IMU Ril
       /// save Undistorted points and their rotation
       it_pcl->x = P_compensate(0);
       it_pcl->y = P_compensate(1);
@@ -390,6 +390,11 @@ void ImuProcess::Process2(LidarMeasureGroup &lidar_meas, StatesGroup &stat, Poin
     if(meas.imu.empty()) {return;};
     /// imu初始化
     IMU_init(meas, stat, init_iter_num);    // init_iter_num用作初始化的imu帧数
+
+    // std::fstream imu_out;
+    // imu_out.open(DEBUG_FILE_DIR("imu_deb.txt"), ios::app);
+    // imu_out << std::fixed << std::setprecision(6) << stat.bias_g.transpose() << endl;
+    // imu_out.close();
 
     return;
   }
